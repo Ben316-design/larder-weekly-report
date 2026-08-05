@@ -201,8 +201,26 @@ function groupMetrics(section) {
   return [...groups.entries()];
 }
 
+function tableHeaderGroups(headers) {
+  const groups = [];
+  headers.forEach((header, index) => {
+    const label = header.group || header.label;
+    const previous = groups.at(-1);
+    if (previous?.label === label) {
+      previous.columns.push({ header, index });
+    } else {
+      groups.push({ label, columns: [{ header, index }] });
+    }
+  });
+  return groups;
+}
+
 function groupClass(index) {
   return `band-${(index % 4) + 1}`;
+}
+
+function tableGroupClass(index) {
+  return `table-band-${(index % 7) + 1}`;
 }
 
 function sectionIcon(section) {
@@ -289,6 +307,7 @@ function renderSummaryCard(card) {
 function renderSection(section) {
   const row = getCurrentRow(section);
   const groups = groupMetrics(section);
+  const tableGroups = tableHeaderGroups(section.headers);
   if (!row) return `<section class="error-state"><p class="eyebrow">NO DATA</p><h2>This report does not include ${escapeHtml(section.label)}.</h2></section>`;
   return `
     <section class="section-hero accent-${section.accent}">
@@ -314,7 +333,14 @@ function renderSection(section) {
       </div>
       <div class="table-wrap" tabindex="0" aria-label="Thirteen-week performance table">
         <table>
-          <thead><tr>${section.headers.map((header, index) => `<th class="${groupClass(index)}">${escapeHtml(header.label)}</th>`).join("")}</tr></thead>
+          <thead>
+            <tr class="table-group-row">${tableGroups.map((group, index) => {
+              const isWeek = group.columns[0].index === 0 && group.columns.length === 1;
+              const span = isWeek ? ' rowspan="2"' : ` colspan="${group.columns.length}"`;
+              return `<th class="${tableGroupClass(index)}" scope="${isWeek ? "col" : "colgroup"}"${span}>${escapeHtml(group.label)}</th>`;
+            }).join("")}</tr>
+            <tr class="table-column-row">${tableGroups.slice(1).flatMap((group, groupIndex) => group.columns.map(({ header }) => `<th class="${tableGroupClass(groupIndex + 1)}" scope="col">${escapeHtml(header.label)}</th>`)).join("")}</tr>
+          </thead>
           <tbody>${section.rows.map((historyRow) => `<tr class="${historyRow.week === row.week ? "is-selected" : ""}">
             <th scope="row">${formatDate(historyRow.week, true)}</th>
             ${historyRow.values.map((value, index) => `<td class="${comparisonClass(section, section.headers[index + 1], value)}">${formatValue(value, section, section.headers[index + 1], historyRow.numberFormats?.[index])}</td>`).join("")}

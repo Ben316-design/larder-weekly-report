@@ -18,6 +18,7 @@ let state = {
   sourceName: savedReport ? loadSavedSourceName() : "Published report",
   isUploaded: Boolean(savedReport),
 };
+let expandedTable = null;
 
 const ratioSections = new Set(["overall-gp", "food-gp", "drink-gp", "wages", "foh", "chefs", "cleaners"]);
 const sectionLayouts = [
@@ -358,9 +359,10 @@ function renderSection(section) {
     <section class="history-section accent-${section.accent}">
       <div class="history-section__heading">
         <div><p class="eyebrow">13-WEEK VIEW</p><h3>Recent performance</h3></div>
-        <span class="swipe-hint">Swipe table &rarr;</span>
+        <span class="swipe-hint">Tap to expand &rarr;</span>
       </div>
-      <div class="table-wrap" tabindex="0" aria-label="Thirteen-week performance table">
+      <div class="table-wrap" tabindex="0" data-action="expand-table" aria-label="Thirteen-week performance table. Tap to view full screen.">
+        <button class="table-expand-close" type="button" data-action="collapse-table" aria-label="Close full screen table">&larr; Back to report</button>
         <table>
           <thead>
             <tr class="table-group-row">${tableGroups.map((group, index) => {
@@ -383,6 +385,7 @@ function renderSection(section) {
 }
 
 function render() {
+  collapseExpandedTable({ restoreFocus: false });
   topWeek.textContent = formatDate(state.week || report.selectedWeek, true).replace(/&mdash;/g, "—");
   renderMenu();
   app.innerHTML = state.section === "overview" ? renderOverview() : renderSection(getSection(state.section));
@@ -413,6 +416,26 @@ function changeSection(section) {
   app.focus({ preventScroll: true });
 }
 
+function expandTable(table) {
+  if (!table || expandedTable === table) return;
+  collapseExpandedTable({ restoreFocus: false });
+  expandedTable = table;
+  table.classList.add("is-expanded");
+  table.setAttribute("aria-label", "Thirteen-week performance table, full screen view.");
+  document.body.classList.add("table-expanded");
+  table.querySelector("[data-action='collapse-table']")?.focus({ preventScroll: true });
+}
+
+function collapseExpandedTable({ restoreFocus = true } = {}) {
+  if (!expandedTable) return;
+  const table = expandedTable;
+  expandedTable = null;
+  table.classList.remove("is-expanded");
+  table.setAttribute("aria-label", "Thirteen-week performance table. Tap to view full screen.");
+  document.body.classList.remove("table-expanded");
+  if (restoreFocus && table.isConnected) table.focus({ preventScroll: true });
+}
+
 function attachDynamicListeners() {
   document.querySelectorAll("[data-section]").forEach((button) => button.addEventListener("click", () => changeSection(button.dataset.section)));
   document.querySelectorAll("[data-action='open-menu']").forEach((button) => button.addEventListener("click", openMenu));
@@ -427,6 +450,21 @@ function attachDynamicListeners() {
     });
   });
   document.querySelectorAll("[data-action='reset-report']").forEach((button) => button.addEventListener("click", resetReport));
+  document.querySelectorAll("[data-action='expand-table']").forEach((table) => {
+    table.addEventListener("click", (event) => {
+      if (!event.target.closest("[data-action='collapse-table']")) expandTable(table);
+    });
+    table.addEventListener("keydown", (event) => {
+      if ((event.key === "Enter" || event.key === " ") && !table.classList.contains("is-expanded")) {
+        event.preventDefault();
+        expandTable(table);
+      }
+    });
+  });
+  document.querySelectorAll("[data-action='collapse-table']").forEach((button) => button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    collapseExpandedTable();
+  }));
 }
 
 function setUploadStatus(message, kind = "") {
@@ -592,6 +630,10 @@ weekButton.addEventListener("click", () => {
   window.setTimeout(() => document.querySelector("#report-uploader")?.focus(), 250);
 });
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && expandedTable) {
+    collapseExpandedTable();
+    return;
+  }
   if (event.key === "Escape" && drawer.classList.contains("is-open")) closeMenu();
 });
 

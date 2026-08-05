@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import { FileBlob, SpreadsheetFile } from "@oai/artifact-tool";
+import { formatAt, readExcelNumberFormats } from "./excel-number-formats.mjs";
 
 const workbookPath = "./data/weekly-report.xlsx";
 const outputPath = "./data/report-data.json";
@@ -8,6 +9,7 @@ const input = await FileBlob.load(workbookPath);
 const workbook = await SpreadsheetFile.importXlsx(input);
 const sheet = workbook.worksheets.getItemAt(0);
 const cells = sheet.getRange("A1:O284").values;
+const numberFormats = await readExcelNumberFormats(workbookPath);
 
 const text = (value) => (value == null ? "" : String(value).trim());
 const dateFromExcel = (value) => {
@@ -15,37 +17,6 @@ const dateFromExcel = (value) => {
   const date = new Date(Date.UTC(1899, 11, 30) + value * 86400000);
   return date.toISOString().slice(0, 10);
 };
-
-const excelColumn = (column) => {
-  let result = "";
-  let remainder = column;
-  while (remainder > 0) {
-    const digit = (remainder - 1) % 26;
-    result = String.fromCharCode(65 + digit) + result;
-    remainder = Math.floor((remainder - 1) / 26);
-  }
-  return result;
-};
-
-async function numberFormatsFor({ dataStart, dataEnd, columns }) {
-  const range = `B${dataStart + 1}:${excelColumn(columns)}${dataEnd + 1}`;
-  const inspected = await workbook.inspect({
-    kind: "computedStyle",
-    sheetId: sheet.name,
-    range,
-    maxChars: 120000,
-  });
-  const formats = new Map();
-  for (const line of inspected.ndjson.split(/\r?\n/)) {
-    if (!line) continue;
-    const entry = JSON.parse(line);
-    if (entry.kind === "computedStyle" && entry.for) formats.set(entry.for, entry.style?.numberFormat || "");
-  }
-  return Array.from({ length: dataEnd - dataStart + 1 }, (_, rowOffset) => Array.from(
-    { length: columns - 1 },
-    (_, columnOffset) => formats.get(`${excelColumn(columnOffset + 2)}${dataStart + rowOffset + 1}`) || "",
-  ));
-}
 
 async function section({ id, label, accent, titleRow, groupRow, headerRow, dataStart, dataEnd, columns }) {
   let activeGroup = "";
@@ -59,7 +30,6 @@ async function section({ id, label, accent, titleRow, groupRow, headerRow, dataS
     };
   });
 
-  const numberFormats = await numberFormatsFor({ dataStart, dataEnd, columns });
   return {
     id,
     label,
@@ -69,7 +39,7 @@ async function section({ id, label, accent, titleRow, groupRow, headerRow, dataS
     rows: cells.slice(dataStart, dataEnd + 1).map((row, index) => ({
       week: dateFromExcel(row[0]),
       values: row.slice(1, columns),
-      numberFormats: numberFormats[index],
+      numberFormats: Array.from({ length: columns - 1 }, (_, columnOffset) => formatAt(numberFormats, dataStart + index, columnOffset + 1)),
     })),
   };
 }
@@ -94,12 +64,13 @@ const sections = [];
 for (const layout of sectionLayouts) sections.push(await section(layout));
 
 const normaliseTrend = (value) => text(value).replace(/^[\u25B2\u25BC\u2191\u2193\s]+/u, "");
-const card = (id, label, value, trend) => {
+const card = (id, label, value, trend, numberFormat) => {
   const cleanTrend = normaliseTrend(trend);
   return {
     id,
     label,
     value,
+    numberFormat,
     trend: cleanTrend,
     tone: cleanTrend.toLowerCase().startsWith("up") ? "positive" : cleanTrend.toLowerCase().startsWith("down") ? "negative" : "neutral",
     detail: "Current published report",
@@ -109,17 +80,17 @@ const data = {
   reportTitle: text(cells[0][0]),
   selectedWeek: dateFromExcel(cells[1][13]),
   overview: [
-    card("sales-inc", "Total sales inc. VAT", cells[5][0], cells[15][0]),
-    card("overall-gp", "Overall GP", cells[5][4], cells[7][4]),
-    card("food-gp", "Food GP", cells[5][8], cells[7][8]),
-    card("drink-gp", "Drink GP", cells[5][12], cells[7][12]),
-    card("sales-ex", "Total sales ex. VAT", cells[13][0], cells[15][0]),
-    card("covers", "Total covers", cells[13][4], cells[15][4]),
-    card("sph", "Spend per head inc. VAT", cells[13][8], cells[15][8]),
-    card("bookings", "Future bookings", cells[13][12], cells[15][12]),
-    card("wages", "Wages as % of sales", cells[21][0], cells[23][0]),
-    card("foh", "FOH wages as % of sales", cells[21][4], cells[23][4]),
-    card("chefs", "Chefs wages as % of sales", cells[21][8], cells[23][8]),
+    card("sales-inc", "Total sales inc. VAT", cells[5][0], cells[15][0], formatAt(numberFormats, 5, 0)),
+    card("overall-gp", "Overall GP", cells[5][4], cells[7][4], formatAt(numberFormats, 5, 4)),
+    card("food-gp", "Food GP", cells[5][8], cells[7][8], formatAt(numberFormats, 5, 8)),
+    card("drink-gp", "Drink GP", cells[5][12], cells[7][12], formatAt(numberFormats, 5, 12)),
+    card("sales-ex", "Total sales ex. VAT", cells[13][0], cells[15][0], formatAt(numberFormats, 13, 0)),
+    card("covers", "Total covers", cells[13][4], cells[15][4], formatAt(numberFormats, 13, 4)),
+    card("sph", "Spend per head inc. VAT", cells[13][8], cells[15][8], formatAt(numberFormats, 13, 8)),
+    card("bookings", "Future bookings", cells[13][12], cells[15][12], formatAt(numberFormats, 13, 12)),
+    card("wages", "Wages as % of sales", cells[21][0], cells[23][0], formatAt(numberFormats, 21, 0)),
+    card("foh", "FOH wages as % of sales", cells[21][4], cells[23][4], formatAt(numberFormats, 21, 4)),
+    card("chefs", "Chefs wages as % of sales", cells[21][8], cells[23][8], formatAt(numberFormats, 21, 8)),
   ],
   sections,
 };

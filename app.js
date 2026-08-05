@@ -9,7 +9,7 @@ const weekButton = document.querySelector("#week-button");
 const uploadInput = document.querySelector("#weekly-report-input");
 
 const fallbackReport = window.LARDER_REPORT_DATA;
-const storageKey = "larder-weekly-report-upload";
+const storageKey = "larder-weekly-report-upload-v2";
 const savedReport = loadSavedReport();
 let report = savedReport || fallbackReport;
 let state = {
@@ -68,8 +68,7 @@ function formatDate(value, short = false) {
 }
 
 function formatOverviewValue(card) {
-  const kind = numberFormatKind(card.numberFormat);
-  if (kind) return formatByKind(card.value, kind, card.numberFormat);
+  if (hasExplicitNumberFormat(card.numberFormat)) return formatWithNumberFormat(card.value, card.numberFormat);
   const label = card.label.toLowerCase();
   if (label.includes("gp") || label.includes("wages as")) return formatByKind(card.value, "percentage");
   if (label.includes("covers") || label.includes("bookings")) return compactNumber.format(card.value);
@@ -79,8 +78,13 @@ function formatOverviewValue(card) {
 function numberFormatKind(numberFormat) {
   const format = plainText(numberFormat).toLowerCase();
   if (format.includes("%")) return "percentage";
-  if (/[£$€]/.test(format) || format.includes("[$")) return "currency";
+  if (/[£$€Ł]/.test(format) || format.includes("[$")) return "currency";
   return "";
+}
+
+function hasExplicitNumberFormat(numberFormat) {
+  const format = plainText(numberFormat).trim().toLowerCase();
+  return Boolean(format && format !== "general" && format !== "@");
 }
 
 function displayKind(section, header, numberFormat) {
@@ -114,6 +118,22 @@ function formatByKind(value, kind, numberFormat = "") {
   }).format(value);
 }
 
+function formatPlainNumber(value, numberFormat = "") {
+  const firstFormat = plainText(numberFormat).split(";")[0];
+  const fractionDigits = decimalPlaces(firstFormat, 0);
+  return new Intl.NumberFormat("en-GB", {
+    useGrouping: /#,##/.test(firstFormat),
+    maximumFractionDigits: fractionDigits,
+    minimumFractionDigits: fractionDigits,
+  }).format(value);
+}
+
+function formatWithNumberFormat(value, numberFormat) {
+  const kind = numberFormatKind(numberFormat);
+  if (kind) return formatByKind(value, kind, numberFormat);
+  return formatPlainNumber(value, numberFormat);
+}
+
 function isPercentage(section, header) {
   const columnLabel = header.label.toLowerCase();
   if (/^(ly sales|ly covers|ly sph|ly 13w ma|sales ex vat|purchases ex vat|total wages|total sales ex vat|food ex vat|drink ex vat|other ex vat|total ex vat)$/.test(columnLabel)) return false;
@@ -140,6 +160,7 @@ function comparisonClass(section, header, value) {
 }
 
 function formatValue(value, section, header, numberFormat) {
+  if (typeof value === "number" && hasExplicitNumberFormat(numberFormat)) return formatWithNumberFormat(value, numberFormat);
   if (value === null || value === undefined || value === "") return "&mdash;";
   if (typeof value !== "number") return escapeHtml(String(value).replace(/Not found/gi, "—"));
   const kind = displayKind(section, header, numberFormat);
@@ -368,7 +389,7 @@ async function handleUpload(files) {
   }
   setUploadStatus("Reading your weekly report…", "is-loading");
   try {
-    const workbook = window.XLSX.read(await file.arrayBuffer(), { type: "array" });
+    const workbook = window.XLSX.read(await file.arrayBuffer(), { type: "array", cellNF: true, cellText: true });
     const sheetName = workbook.SheetNames.find((name) => /generate\s*report/i.test(name)) || workbook.SheetNames[0];
     if (!sheetName) throw new Error("The workbook does not contain a report sheet.");
     const nextReport = reportFromSheet(workbook.Sheets[sheetName]);
@@ -505,7 +526,7 @@ async function loadPublishedWorkbook() {
   try {
     const response = await fetch("./data/weekly-report.xlsx", { cache: "no-store" });
     if (!response.ok) return;
-    const workbook = window.XLSX.read(await response.arrayBuffer(), { type: "array" });
+    const workbook = window.XLSX.read(await response.arrayBuffer(), { type: "array", cellNF: true, cellText: true });
     const sheetName = workbook.SheetNames.find((name) => /generate\s*report/i.test(name)) || workbook.SheetNames[0];
     if (!sheetName) return;
     const publishedReport = reportFromSheet(workbook.Sheets[sheetName]);

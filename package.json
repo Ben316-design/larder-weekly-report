@@ -1,0 +1,10 @@
+{
+  "name": "larder-report-viewer",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/serve.mjs",
+    "refresh-data": "node scripts/build-report-data.mjs"
+  }
+}

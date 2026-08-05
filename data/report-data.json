@@ -154,6 +154,68 @@
           "group": "Compared To Last Year up/down %"
         }
       ],
+      "columnStyles": [
+        {
+          "numberFormat": "\\£#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "\\£#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "\\£#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "\\£#,##0",
+          "fill": "#FF9966",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "\\£#,##0",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "\\£#,##0",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "\\£#,##0",
+          "fill": "#F8F7F3",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        }
+      ],
       "rows": [
         {
           "week": "2026-04-26",
@@ -569,6 +631,86 @@
         {
           "label": "13W %",
           "group": "Compared To Last Year up/down %"
+        }
+      ],
+      "columnStyles": [
+        {
+          "numberFormat": "#,##0",
+          "fill": "",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "#,##0",
+          "fill": "",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0",
+          "fill": "#FF9966",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0",
+          "fill": "#F8F7F3",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
         }
       ],
       "rows": [
@@ -1058,6 +1200,74 @@
           "group": "Special set Menu"
         }
       ],
+      "columnStyles": [
+        {
+          "numberFormat": "#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "#,##0",
+          "fill": "#CCC1DA",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0",
+          "fill": "#FFFF99",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0",
+          "fill": "#FFFF99",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "#,##0",
+          "fill": "#17375E",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "#,##0",
+          "fill": "#CCC1DA",
+          "color": "#1A1A1A",
+          "bold": true
+        }
+      ],
       "rows": [
         {
           "week": "2026-04-26",
@@ -1493,6 +1703,74 @@
           "group": "Special set Menu"
         }
       ],
+      "columnStyles": [
+        {
+          "numberFormat": "#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "#,##0",
+          "fill": "#CCC1DA",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0",
+          "fill": "#FFFF99",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0",
+          "fill": "#FFFF99",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "#,##0",
+          "fill": "#17375E",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "#,##0",
+          "fill": "#CCC1DA",
+          "color": "#1A1A1A",
+          "bold": true
+        }
+      ],
       "rows": [
         {
           "week": "2026-04-26",
@@ -1912,6 +2190,50 @@
           "group": "Compared To Last Year up/down %"
         }
       ],
+      "columnStyles": [
+        {
+          "numberFormat": "\\£#,##0",
+          "fill": "#FF9966",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "\"£\"#,##0",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "\"£\"#,##0",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "\"£\"#,##0",
+          "fill": "#F8F7F3",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        }
+      ],
       "rows": [
         {
           "week": "2026-04-26",
@@ -2225,6 +2547,50 @@
         {
           "label": "13W %",
           "group": "Compared To Last Year up/down %"
+        }
+      ],
+      "columnStyles": [
+        {
+          "numberFormat": "#,##0",
+          "fill": "#FF9966",
+          "color": "#FFFFFF",
+          "bold": true
+        },
+        {
+          "numberFormat": "0",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0",
+          "fill": "#F8F7F3",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
         }
       ],
       "rows": [
@@ -2548,6 +2914,62 @@
         {
           "label": "13W %",
           "group": "Compared To Last Year up/down %"
+        }
+      ],
+      "columnStyles": [
+        {
+          "numberFormat": "\\£#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FF9966",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F7F3",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
         }
       ],
       "rows": [
@@ -2927,6 +3349,68 @@
         {
           "label": "Adjusted Food GP%",
           "group": "Food GP Adjusted"
+        }
+      ],
+      "columnStyles": [
+        {
+          "numberFormat": "\\£#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#B3A2C7",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F7F3",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#B7DEE8",
+          "color": "#1A1A1A",
+          "bold": true
         }
       ],
       "rows": [
@@ -3334,6 +3818,68 @@
           "group": "Drink GP Adjusted"
         }
       ],
+      "columnStyles": [
+        {
+          "numberFormat": "\\£#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F5F4ED",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F7F3",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#D99694",
+          "color": "#1A1A1A",
+          "bold": true
+        }
+      ],
       "rows": [
         {
           "week": "2026-04-26",
@@ -3735,6 +4281,62 @@
           "group": "Up or Down on SWLY"
         }
       ],
+      "columnStyles": [
+        {
+          "numberFormat": "\\£#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "\\£#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#E46C0A",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F7F3",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#FBF4DE",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#B3A2C7",
+          "color": "#1A1A1A",
+          "bold": true
+        }
+      ],
       "rows": [
         {
           "week": "2026-04-26",
@@ -4112,6 +4714,68 @@
         {
           "label": "13W %",
           "group": "Compared To Last Year up/down %"
+        }
+      ],
+      "columnStyles": [
+        {
+          "numberFormat": "\\£#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "\\£#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F5F4ED",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#93CDDD",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F7F3",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#B3A2C7",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#B3A2C7",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#B3A2C7",
+          "color": "#1A1A1A",
+          "bold": true
         }
       ],
       "rows": [
@@ -4515,6 +5179,62 @@
           "group": "Compared To Last Year up/down %"
         }
       ],
+      "columnStyles": [
+        {
+          "numberFormat": "\\£#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "\\£#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#B3A2C7",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#93CDDD",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F7F3",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#B3A2C7",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#B3A2C7",
+          "color": "#1A1A1A",
+          "bold": true
+        }
+      ],
       "rows": [
         {
           "week": "2026-04-26",
@@ -4888,6 +5608,62 @@
         {
           "label": "7W %",
           "group": "Compared To Last Year up/down %"
+        }
+      ],
+      "columnStyles": [
+        {
+          "numberFormat": "\\£#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "\\£#,##0",
+          "fill": "#FFFFFF",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#92D050",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#93CDDD",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F1D7",
+          "color": "#1A1A1A",
+          "bold": false
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#F8F7F3",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#B3A2C7",
+          "color": "#1A1A1A",
+          "bold": true
+        },
+        {
+          "numberFormat": "0.0%",
+          "fill": "#B3A2C7",
+          "color": "#1A1A1A",
+          "bold": true
         }
       ],
       "rows": [

@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import { FileBlob, SpreadsheetFile } from "@oai/artifact-tool";
-import { formatAt, readExcelNumberFormats } from "./excel-number-formats.mjs";
+import { formatAt, readExcelCellStyles, styleAt } from "./excel-number-formats.mjs";
 
 const workbookPath = "./data/weekly-report.xlsx";
 const outputPath = "./data/report-data.json";
@@ -9,7 +9,8 @@ const input = await FileBlob.load(workbookPath);
 const workbook = await SpreadsheetFile.importXlsx(input);
 const sheet = workbook.worksheets.getItemAt(0);
 const cells = sheet.getRange("A1:O284").values;
-const numberFormats = await readExcelNumberFormats(workbookPath);
+const cellStyles = await readExcelCellStyles(workbookPath);
+const numberFormats = new Map([...cellStyles].map(([reference, style]) => [reference, style.numberFormat || "General"]));
 
 const text = (value) => (value == null ? "" : String(value).trim());
 const dateFromExcel = (value) => {
@@ -36,6 +37,7 @@ async function section({ id, label, accent, titleRow, groupRow, headerRow, dataS
     accent,
     title: text(cells[titleRow][0]) || label,
     headers,
+    columnStyles: Array.from({ length: columns - 1 }, (_, columnOffset) => styleAt(cellStyles, dataStart, columnOffset + 1)),
     rows: cells.slice(dataStart, dataEnd + 1).map((row, index) => ({
       week: dateFromExcel(row[0]),
       values: row.slice(1, columns),

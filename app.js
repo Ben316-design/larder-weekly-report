@@ -151,12 +151,38 @@ function isCurrency(section, header) {
 }
 
 function comparisonClass(section, header, value) {
-  if (typeof value !== "number" || !isPercentage(section, header)) return "";
+  if (typeof value !== "number") return "";
+  const label = plainText(header.label).toLowerCase();
   const group = plainText(header.group).toLowerCase();
-  if (!/compared to last year|up or down/.test(group)) return "";
-  if (value > 0) return "comparison-positive";
-  if (value < 0) return "comparison-negative";
+  const isComparison = section.id === "wages"
+    ? label === "ly % of sales" && /up or down/.test(group)
+    : /up\/?down|same week|variance from target|^(?:7w|13w)\s*%$/.test(label);
+  if (!isComparison) return "";
+  const lowerIsBetter = ["wages", "foh", "chefs", "cleaners"].includes(section.id);
+  if (value > 0) return lowerIsBetter ? "comparison-negative" : "comparison-positive";
+  if (value < 0) return lowerIsBetter ? "comparison-positive" : "comparison-negative";
   return "";
+}
+
+function validSheetColour(value) {
+  const colour = plainText(value).replace(/^#/, "").slice(-6);
+  return /^[0-9a-f]{6}$/i.test(colour) ? `#${colour.toUpperCase()}` : "";
+}
+
+function sheetStyleAttribute(style) {
+  if (!style || typeof style !== "object") return "";
+  const fill = validSheetColour(style.fill) || "#FFFFFF";
+  const colour = validSheetColour(style.color) || "#1A1A1A";
+  const weight = style.bold ? "700" : "400";
+  return ` style="--sheet-fill:${fill};--sheet-colour:${colour};--sheet-weight:${weight}"`;
+}
+
+function sheetStyleClass(style) {
+  return style && typeof style === "object" ? "sheet-style" : "";
+}
+
+function classNames(...names) {
+  return names.filter(Boolean).join(" ");
 }
 
 function formatValue(value, section, header, numberFormat) {
@@ -321,7 +347,10 @@ function renderSection(section) {
     <div class="metric-groups accent-${section.accent}">
       ${groups.map(([name, metrics], groupIndex) => `<section class="metric-group ${groupClass(groupIndex)}">
         <h3>${escapeHtml(name)}</h3><div class="metric-grid">
-          ${metrics.map(({ header, index }) => `<article class="metric-card ${comparisonClass(section, header, row.values[index])}"><span>${escapeHtml(header.label)}</span><strong>${formatValue(row.values[index], section, header, row.numberFormats?.[index])}</strong></article>`).join("")}
+          ${metrics.map(({ header, index }) => {
+            const columnStyle = section.columnStyles?.[index];
+            return `<article class="${classNames("metric-card", sheetStyleClass(columnStyle), comparisonClass(section, header, row.values[index]))}"${sheetStyleAttribute(columnStyle)}><span>${escapeHtml(header.label)}</span><strong>${formatValue(row.values[index], section, header, row.numberFormats?.[index])}</strong></article>`;
+          }).join("")}
         </div>
       </section>`).join("")}
     </div>
@@ -343,7 +372,10 @@ function renderSection(section) {
           </thead>
           <tbody>${section.rows.map((historyRow) => `<tr class="${historyRow.week === row.week ? "is-selected" : ""}">
             <th scope="row">${formatDate(historyRow.week, true)}</th>
-            ${historyRow.values.map((value, index) => `<td class="${comparisonClass(section, section.headers[index + 1], value)}">${formatValue(value, section, section.headers[index + 1], historyRow.numberFormats?.[index])}</td>`).join("")}
+            ${historyRow.values.map((value, index) => {
+              const columnStyle = section.columnStyles?.[index];
+              return `<td class="${classNames(sheetStyleClass(columnStyle), comparisonClass(section, section.headers[index + 1], value))}"${sheetStyleAttribute(columnStyle)}>${formatValue(value, section, section.headers[index + 1], historyRow.numberFormats?.[index])}</td>`;
+            }).join("")}
           </tr>`).join("")}</tbody>
         </table>
       </div>
@@ -415,7 +447,7 @@ async function handleUpload(files) {
   }
   setUploadStatus("Reading your weekly report…", "is-loading");
   try {
-    const workbook = window.XLSX.read(await file.arrayBuffer(), { type: "array", cellNF: true, cellText: true });
+    const workbook = window.XLSX.read(await file.arrayBuffer(), { type: "array", cellNF: true, cellText: true, cellStyles: true });
     const sheetName = workbook.SheetNames.find((name) => /generate\s*report/i.test(name)) || workbook.SheetNames[0];
     if (!sheetName) throw new Error("The workbook does not contain a report sheet.");
     const nextReport = reportFromSheet(workbook.Sheets[sheetName]);
@@ -439,6 +471,17 @@ function cellValue(sheet, row, column) {
 function cellNumberFormat(sheet, row, column) {
   const address = window.XLSX.utils.encode_cell({ r: row, c: column });
   return sheet[address]?.z || "";
+}
+
+function cellDisplayStyle(sheet, row, column) {
+  const address = window.XLSX.utils.encode_cell({ r: row, c: column });
+  const cell = sheet[address] || {};
+  const style = cell.s && typeof cell.s === "object" ? cell.s : {};
+  return {
+    fill: validSheetColour(style.fill?.fgColor?.rgb || style.fill?.fgColor || style.fill?.bgColor?.rgb || style.fill?.bgColor || cell.fill?.fgColor?.rgb),
+    color: validSheetColour(style.font?.color?.rgb || style.font?.color || cell.font?.color?.rgb),
+    bold: Boolean(style.font?.bold || style.bold || cell.font?.bold),
+  };
 }
 
 function dateFromExcel(value) {
@@ -497,7 +540,15 @@ function sectionFromSheet(sheet, layout, selectedWeek) {
       numberFormats: Array.from({ length: layout.columns - 1 }, (_, index) => cellNumberFormat(sheet, rowIndex, index + 1)),
     });
   }
-  return { id: layout.id, label: layout.label, accent: layout.accent, title: plainText(cellValue(sheet, layout.titleRow, 0)) || layout.label, headers, rows };
+  return {
+    id: layout.id,
+    label: layout.label,
+    accent: layout.accent,
+    title: plainText(cellValue(sheet, layout.titleRow, 0)) || layout.label,
+    headers,
+    columnStyles: Array.from({ length: layout.columns - 1 }, (_, index) => cellDisplayStyle(sheet, layout.dataStart, index + 1)),
+    rows,
+  };
 }
 
 function loadSavedReport() {
@@ -548,11 +599,11 @@ render();
 loadPublishedWorkbook();
 
 async function loadPublishedWorkbook() {
-  if (savedReport || !window.XLSX || location.protocol === "file:") return;
+  if (savedReport || fallbackReport.sections?.every((section) => section.columnStyles?.length) || !window.XLSX || location.protocol === "file:") return;
   try {
     const response = await fetch("./data/weekly-report.xlsx", { cache: "no-store" });
     if (!response.ok) return;
-    const workbook = window.XLSX.read(await response.arrayBuffer(), { type: "array", cellNF: true, cellText: true });
+    const workbook = window.XLSX.read(await response.arrayBuffer(), { type: "array", cellNF: true, cellText: true, cellStyles: true });
     const sheetName = workbook.SheetNames.find((name) => /generate\s*report/i.test(name)) || workbook.SheetNames[0];
     if (!sheetName) return;
     const publishedReport = reportFromSheet(workbook.Sheets[sheetName]);

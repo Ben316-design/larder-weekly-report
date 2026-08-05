@@ -51,8 +51,6 @@ const overviewLayouts = [
 ];
 
 const compactNumber = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 1, minimumFractionDigits: 0 });
-const currency = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 2, minimumFractionDigits: 0 });
-const percentage = new Intl.NumberFormat("en-GB", { style: "percent", maximumFractionDigits: 1, minimumFractionDigits: 0 });
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
@@ -70,13 +68,55 @@ function formatDate(value, short = false) {
 }
 
 function formatOverviewValue(card) {
+  const kind = numberFormatKind(card.numberFormat);
+  if (kind) return formatByKind(card.value, kind, card.numberFormat);
   const label = card.label.toLowerCase();
-  if (label.includes("gp") || label.includes("wages as")) return percentage.format(card.value);
+  if (label.includes("gp") || label.includes("wages as")) return formatByKind(card.value, "percentage");
   if (label.includes("covers") || label.includes("bookings")) return compactNumber.format(card.value);
-  return currency.format(card.value);
+  return formatByKind(card.value, "currency");
+}
+
+function numberFormatKind(numberFormat) {
+  const format = plainText(numberFormat).toLowerCase();
+  if (format.includes("%")) return "percentage";
+  if (/[£$€]/.test(format) || format.includes("[$")) return "currency";
+  return "";
+}
+
+function displayKind(section, header, numberFormat) {
+  if (isPercentage(section, header)) return "percentage";
+  if (isCurrency(section, header)) return "currency";
+  return numberFormatKind(numberFormat);
+}
+
+function decimalPlaces(numberFormat, fallback) {
+  const firstFormat = plainText(numberFormat).split(";")[0];
+  const decimalPart = firstFormat.match(/\.([0#]+)/)?.[1];
+  return decimalPart ? decimalPart.length : fallback;
+}
+
+function formatByKind(value, kind, numberFormat = "") {
+  const sourceKind = numberFormatKind(numberFormat);
+  const fallbackPlaces = kind === "currency" ? 0 : 1;
+  const fractionDigits = sourceKind === kind ? decimalPlaces(numberFormat, fallbackPlaces) : fallbackPlaces;
+  if (kind === "currency") {
+    return new Intl.NumberFormat("en-GB", {
+      style: "currency",
+      currency: "GBP",
+      maximumFractionDigits: fractionDigits,
+      minimumFractionDigits: fractionDigits,
+    }).format(value);
+  }
+  return new Intl.NumberFormat("en-GB", {
+    style: "percent",
+    maximumFractionDigits: fractionDigits,
+    minimumFractionDigits: fractionDigits,
+  }).format(value);
 }
 
 function isPercentage(section, header) {
+  const columnLabel = header.label.toLowerCase();
+  if (/^(ly sales|ly covers|ly sph|ly 13w ma|sales ex vat|purchases ex vat|total wages|total sales ex vat|food ex vat|drink ex vat|other ex vat|total ex vat)$/.test(columnLabel)) return false;
   const label = `${header.label} ${header.group}`.toLowerCase();
   if (/%|up\/down|variance|same week|7w %|13w %/.test(label)) return true;
   if (!ratioSections.has(section.id)) return false;
@@ -90,11 +130,11 @@ function isCurrency(section, header) {
   return /sales|purchases|wages|sph|spend/.test(label);
 }
 
-function formatValue(value, section, header) {
+function formatValue(value, section, header, numberFormat) {
   if (value === null || value === undefined || value === "") return "&mdash;";
   if (typeof value !== "number") return escapeHtml(String(value).replace(/Not found/gi, "—"));
-  if (isPercentage(section, header)) return percentage.format(value);
-  if (isCurrency(section, header)) return currency.format(value);
+  const kind = displayKind(section, header, numberFormat);
+  if (kind) return formatByKind(value, kind, numberFormat);
   return compactNumber.format(value);
 }
 
@@ -178,7 +218,7 @@ function renderOverview() {
     <section class="page-intro overview-intro">
       <p class="eyebrow">WEEKLY PERFORMANCE REPORT</p>
       <h2>At a glance</h2>
-      <p>One current report, designed for a quick read on your phone.</p>
+      <p>The current week, with the last 13 weeks kept in every report section.</p>
     </section>
 
     <section class="week-hero" aria-label="Current report week">
@@ -232,10 +272,26 @@ function renderSection(section) {
     <div class="metric-groups accent-${section.accent}">
       ${groups.map(([name, metrics], groupIndex) => `<section class="metric-group ${groupClass(groupIndex)}">
         <h3>${escapeHtml(name)}</h3><div class="metric-grid">
-          ${metrics.map(({ header, index }) => `<article class="metric-card"><span>${escapeHtml(header.label)}</span><strong>${formatValue(row.values[index], section, header)}</strong></article>`).join("")}
+          ${metrics.map(({ header, index }) => `<article class="metric-card"><span>${escapeHtml(header.label)}</span><strong>${formatValue(row.values[index], section, header, row.numberFormats?.[index])}</strong></article>`).join("")}
         </div>
       </section>`).join("")}
-    </div>`;
+    </div>
+
+    <section class="history-section accent-${section.accent}">
+      <div class="history-section__heading">
+        <div><p class="eyebrow">13-WEEK VIEW</p><h3>Recent performance</h3></div>
+        <span class="swipe-hint">Swipe table &rarr;</span>
+      </div>
+      <div class="table-wrap" tabindex="0" aria-label="Thirteen-week performance table">
+        <table>
+          <thead><tr>${section.headers.map((header, index) => `<th class="${groupClass(index)}">${escapeHtml(header.label)}</th>`).join("")}</tr></thead>
+          <tbody>${section.rows.map((historyRow) => `<tr class="${historyRow.week === row.week ? "is-selected" : ""}">
+            <th scope="row">${formatDate(historyRow.week, true)}</th>
+            ${historyRow.values.map((value, index) => `<td>${formatValue(value, section, section.headers[index + 1], historyRow.numberFormats?.[index])}</td>`).join("")}
+          </tr>`).join("")}</tbody>
+        </table>
+      </div>
+    </section>`;
 }
 
 function render() {
@@ -324,6 +380,11 @@ function cellValue(sheet, row, column) {
   return sheet[address]?.v ?? null;
 }
 
+function cellNumberFormat(sheet, row, column) {
+  const address = window.XLSX.utils.encode_cell({ r: row, c: column });
+  return sheet[address]?.z || "";
+}
+
 function dateFromExcel(value) {
   if (value instanceof Date) return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
   if (typeof value === "number") {
@@ -348,7 +409,15 @@ function reportFromSheet(sheet) {
     selectedWeek: week,
     overview: overviewLayouts.map((layout) => {
       const trend = plainText(cellValue(sheet, layout.trend[0], layout.trend[1]));
-      return { id: layout.id, label: layout.label, value: cellValue(sheet, layout.value[0], layout.value[1]), trend, tone: trendTone(trend), detail: "Current uploaded report" };
+      return {
+        id: layout.id,
+        label: layout.label,
+        value: cellValue(sheet, layout.value[0], layout.value[1]),
+        numberFormat: cellNumberFormat(sheet, layout.value[0], layout.value[1]),
+        trend,
+        tone: trendTone(trend),
+        detail: "Current report",
+      };
     }),
     sections,
   };
@@ -366,10 +435,13 @@ function sectionFromSheet(sheet, layout, selectedWeek) {
   for (let rowIndex = layout.dataStart; rowIndex <= layout.dataEnd; rowIndex += 1) {
     const week = dateFromExcel(cellValue(sheet, rowIndex, 0));
     if (!week) continue;
-    rows.push({ week, values: Array.from({ length: layout.columns - 1 }, (_, index) => cellValue(sheet, rowIndex, index + 1)) });
+    rows.push({
+      week,
+      values: Array.from({ length: layout.columns - 1 }, (_, index) => cellValue(sheet, rowIndex, index + 1)),
+      numberFormats: Array.from({ length: layout.columns - 1 }, (_, index) => cellNumberFormat(sheet, rowIndex, index + 1)),
+    });
   }
-  const current = rows.find((row) => row.week === selectedWeek) || rows[0];
-  return { id: layout.id, label: layout.label, accent: layout.accent, title: plainText(cellValue(sheet, layout.titleRow, 0)) || layout.label, headers, rows: current ? [current] : [] };
+  return { id: layout.id, label: layout.label, accent: layout.accent, title: plainText(cellValue(sheet, layout.titleRow, 0)) || layout.label, headers, rows };
 }
 
 function loadSavedReport() {

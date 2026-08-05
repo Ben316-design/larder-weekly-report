@@ -130,6 +130,15 @@ function isCurrency(section, header) {
   return /sales|purchases|wages|sph|spend/.test(label);
 }
 
+function comparisonClass(section, header, value) {
+  if (typeof value !== "number" || !isPercentage(section, header)) return "";
+  const group = plainText(header.group).toLowerCase();
+  if (!/compared to last year|up or down/.test(group)) return "";
+  if (value > 0) return "comparison-positive";
+  if (value < 0) return "comparison-negative";
+  return "";
+}
+
 function formatValue(value, section, header, numberFormat) {
   if (value === null || value === undefined || value === "") return "&mdash;";
   if (typeof value !== "number") return escapeHtml(String(value).replace(/Not found/gi, "—"));
@@ -272,7 +281,7 @@ function renderSection(section) {
     <div class="metric-groups accent-${section.accent}">
       ${groups.map(([name, metrics], groupIndex) => `<section class="metric-group ${groupClass(groupIndex)}">
         <h3>${escapeHtml(name)}</h3><div class="metric-grid">
-          ${metrics.map(({ header, index }) => `<article class="metric-card"><span>${escapeHtml(header.label)}</span><strong>${formatValue(row.values[index], section, header, row.numberFormats?.[index])}</strong></article>`).join("")}
+          ${metrics.map(({ header, index }) => `<article class="metric-card ${comparisonClass(section, header, row.values[index])}"><span>${escapeHtml(header.label)}</span><strong>${formatValue(row.values[index], section, header, row.numberFormats?.[index])}</strong></article>`).join("")}
         </div>
       </section>`).join("")}
     </div>
@@ -287,7 +296,7 @@ function renderSection(section) {
           <thead><tr>${section.headers.map((header, index) => `<th class="${groupClass(index)}">${escapeHtml(header.label)}</th>`).join("")}</tr></thead>
           <tbody>${section.rows.map((historyRow) => `<tr class="${historyRow.week === row.week ? "is-selected" : ""}">
             <th scope="row">${formatDate(historyRow.week, true)}</th>
-            ${historyRow.values.map((value, index) => `<td>${formatValue(value, section, section.headers[index + 1], historyRow.numberFormats?.[index])}</td>`).join("")}
+            ${historyRow.values.map((value, index) => `<td class="${comparisonClass(section, section.headers[index + 1], value)}">${formatValue(value, section, section.headers[index + 1], historyRow.numberFormats?.[index])}</td>`).join("")}
           </tr>`).join("")}</tbody>
         </table>
       </div>

@@ -10,6 +10,8 @@ const uploadInput = document.querySelector("#weekly-report-input");
 
 const fallbackReport = window.LARDER_REPORT_DATA;
 const storageKey = "larder-weekly-report-upload-v2";
+const sharedReportEndpoint = "/.netlify/functions/report";
+const sharedReportPollInterval = 60_000;
 const savedReport = loadSavedReport();
 const lowerIsBetterOverviewIds = new Set(["wages", "foh", "chefs"]);
 let report = withOverviewTones(savedReport || fallbackReport);
@@ -20,6 +22,7 @@ let state = {
   isUploaded: Boolean(savedReport),
 };
 let expandedTable = null;
+let sharedReportVersion = "";
 
 const ratioSections = new Set(["overall-gp", "food-gp", "drink-gp", "wages", "foh", "chefs", "cleaners"]);
 const sectionLayouts = [
@@ -282,11 +285,12 @@ function renderMenu() {
 
 function renderUploader() {
   const uploaded = state.isUploaded;
+  const sharedUpdates = canUseSharedUpdates();
   return `<section class="upload-panel ${uploaded ? "is-uploaded" : ""}" aria-label="Update weekly report">
     <div class="upload-panel__copy">
       <p class="eyebrow">WEEKLY UPDATE</p>
       <h3>${uploaded ? "This week is ready" : "Update this week's report"}</h3>
-      <p>Drop an Excel report here to replace the figures shown on this device.</p>
+      <p>${sharedUpdates ? "Drop an Excel report here to update the figures for everyone." : "Drop an Excel report here to replace the figures shown on this device."}</p>
     </div>
     <button class="drop-zone" id="report-uploader" type="button" data-action="choose-upload">
       <span class="drop-zone__icon">⇪</span>
@@ -331,14 +335,16 @@ function renderOverview() {
 }
 
 function renderUpdateReport() {
+  const sharedUpdates = canUseSharedUpdates();
   return `
     <section class="update-report-page">
       <button class="back-link" type="button" data-section="overview">&larr; Overview</button>
       <div class="page-intro update-report-intro">
         <p class="eyebrow">WEEKLY REPORT</p>
         <h2>Update report</h2>
-        <p>Drag in this week’s Excel report to update the figures shown on this device.</p>
+        <p>${sharedUpdates ? "Drag in this week’s Excel report to update the app for everyone." : "This local preview can only update this device. Open the published Netlify app to update everyone."}</p>
       </div>
+      ${sharedUpdates ? `<label class="update-password" for="report-update-key"><span>Update password</span><input id="report-update-key" type="password" autocomplete="current-password" placeholder="Enter your update password"><small>This is only used to publish this week’s report.</small></label>` : ""}
       ${renderUploader()}
     </section>`;
 }
@@ -512,6 +518,63 @@ function setUploadStatus(message, kind = "") {
   if (status) status.innerHTML = `<span class="${kind}">${escapeHtml(message)}</span>`;
 }
 
+function canUseSharedUpdates() {
+  return location.protocol === "https:";
+}
+
+function isSharedReportPayload(payload) {
+  return Boolean(payload?.report?.selectedWeek && Array.isArray(payload.report.sections) && Array.isArray(payload.report.overview));
+}
+
+function applySharedReport(payload, { renderAfterLoad = false } = {}) {
+  if (!isSharedReportPayload(payload)) return false;
+  const version = plainText(payload.version || payload.updatedAt);
+  const hasChanged = !sharedReportVersion || version !== sharedReportVersion;
+  if (!hasChanged) return true;
+  report = withOverviewTones(payload.report);
+  state = {
+    ...state,
+    week: report.selectedWeek,
+    sourceName: plainText(payload.sourceName) || "Published report",
+    isUploaded: false,
+  };
+  sharedReportVersion = version || report.selectedWeek;
+  if (renderAfterLoad || hasChanged) render();
+  return true;
+}
+
+async function loadSharedReport({ renderAfterLoad = false } = {}) {
+  if (!canUseSharedUpdates()) return false;
+  try {
+    const response = await fetch(sharedReportEndpoint, { cache: "no-store", headers: { Accept: "application/json" } });
+    if (response.status === 404) return false;
+    if (!response.ok) throw new Error(`The shared report could not be loaded (${response.status}).`);
+    return applySharedReport(await response.json(), { renderAfterLoad });
+  } catch (error) {
+    console.warn("The shared report could not be loaded.", error);
+    return false;
+  }
+}
+
+async function publishSharedReport(nextReport, sourceName) {
+  const updateKey = document.querySelector("#report-update-key")?.value.trim();
+  if (!updateKey) throw new Error("Enter the update password before publishing the report.");
+  const response = await fetch(sharedReportEndpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Report-Update-Key": updateKey,
+    },
+    body: JSON.stringify({ report: nextReport, sourceName }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (response.status === 401) throw new Error("That update password is not correct.");
+  if (response.status === 503) throw new Error("Shared updates have not been configured in Netlify yet.");
+  if (!response.ok) throw new Error(payload.error || "The report could not be published for everyone.");
+  if (!isSharedReportPayload(payload)) throw new Error("The shared report was saved, but its confirmation was incomplete.");
+  return payload;
+}
+
 async function handleUpload(files) {
   const file = files?.[0];
   if (!file) return;
@@ -529,10 +592,17 @@ async function handleUpload(files) {
     const sheetName = workbook.SheetNames.find((name) => /generate\s*report/i.test(name)) || workbook.SheetNames[0];
     if (!sheetName) throw new Error("The workbook does not contain a report sheet.");
     const nextReport = reportFromSheet(workbook.Sheets[sheetName]);
-    report = nextReport;
-    state = { section: "overview", week: nextReport.selectedWeek, sourceName: file.name, isUploaded: true };
-    saveReport(nextReport, file.name);
-    render();
+    if (!canUseSharedUpdates()) {
+      report = withOverviewTones(nextReport);
+      state = { section: "overview", week: nextReport.selectedWeek, sourceName: file.name, isUploaded: true };
+      saveReport(nextReport, file.name);
+      render();
+      return;
+    }
+    setUploadStatus("Publishing this week for everyone…", "is-loading");
+    const sharedReport = await publishSharedReport(nextReport, file.name);
+    applySharedReport(sharedReport, { renderAfterLoad: true });
+    setUploadStatus("Updated for everyone. Open reports refresh automatically within one minute.", "is-success");
   } catch (error) {
     console.error(error);
     setUploadStatus(error.message || "The report could not be read. Please use the single-sheet weekly report export.", "is-error");
@@ -659,6 +729,7 @@ function resetReport() {
   report = withOverviewTones(fallbackReport);
   state = { section: "overview", week: report.selectedWeek, sourceName: "Published report", isUploaded: false };
   render();
+  void loadSharedReport({ renderAfterLoad: true });
 }
 
 uploadInput.addEventListener("change", (event) => handleUpload(event.target.files));
@@ -682,10 +753,16 @@ window.addEventListener("orientationchange", () => {
 });
 
 render();
-loadPublishedWorkbook();
+loadInitialReport();
+
+async function loadInitialReport() {
+  const loadedSharedReport = await loadSharedReport({ renderAfterLoad: true });
+  if (!loadedSharedReport) await loadPublishedWorkbook();
+  if (canUseSharedUpdates()) window.setInterval(() => { void loadSharedReport(); }, sharedReportPollInterval);
+}
 
 async function loadPublishedWorkbook() {
-  if (savedReport || fallbackReport.sections?.every((section) => section.columnStyles?.length) || !window.XLSX || location.protocol === "file:") return;
+  if (!window.XLSX || location.protocol === "file:") return;
   try {
     const response = await fetch("./data/weekly-report.xlsx", { cache: "no-store" });
     if (!response.ok) return;
@@ -693,7 +770,7 @@ async function loadPublishedWorkbook() {
     const sheetName = workbook.SheetNames.find((name) => /generate\s*report/i.test(name)) || workbook.SheetNames[0];
     if (!sheetName) return;
     const publishedReport = reportFromSheet(workbook.Sheets[sheetName]);
-    report = publishedReport;
+    report = withOverviewTones(publishedReport);
     state = { section: "overview", week: publishedReport.selectedWeek, sourceName: "Published report", isUploaded: false };
     render();
   } catch (error) {

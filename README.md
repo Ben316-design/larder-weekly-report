@@ -20,7 +20,16 @@ Open `http://localhost:4173`. The local server allows the app to load the publis
 
 ## Project files
 
-- `data/weekly-report.xlsx` — the one published weekly spreadsheet. Replace this file on GitHub each week.
+- `data/weekly-report.xlsx` — the fallback weekly spreadsheet used before the first shared update.
 - `report-data.js` — a built-in fallback snapshot for direct local-file previews.
 - `app.js` — the phone interface and Excel-file reader.
-- `netlify.toml` — tells Netlify to publish this folder with no build command.
+- `netlify/functions/report.mjs` — securely stores the shared report published from the app.
+- `netlify.toml` — tells Netlify where to publish the site and shared-report function.
+
+## One-time shared update setup
+
+1. Connect the Netlify project to this GitHub repository so that Netlify deploys the shared-report function from `main`.
+2. In the Netlify project, add a secret environment variable called `REPORT_UPDATE_KEY`. Choose a long password and keep it private.
+3. After the first successful deploy, open the published app, choose **Update report**, enter that password, and drop in the weekly Excel file.
+
+The newly published report is stored centrally. Anyone using the app receives it when they open the report, and already-open reports check for it every minute.

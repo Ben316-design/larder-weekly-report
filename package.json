@@ -3,6 +3,9 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "dependencies": {
+    "@netlify/blobs": "10.7.10"
+  },
   "scripts": {
     "start": "node scripts/serve.mjs",
     "refresh-data": "node scripts/build-report-data.mjs"

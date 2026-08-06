@@ -11,7 +11,8 @@ const uploadInput = document.querySelector("#weekly-report-input");
 const fallbackReport = window.LARDER_REPORT_DATA;
 const storageKey = "larder-weekly-report-upload-v2";
 const savedReport = loadSavedReport();
-let report = savedReport || fallbackReport;
+const lowerIsBetterOverviewIds = new Set(["wages", "foh", "chefs"]);
+let report = withOverviewTones(savedReport || fallbackReport);
 let state = {
   section: "overview",
   week: report.selectedWeek,
@@ -199,11 +200,20 @@ function arrowForTrend(trend) {
   return normaliseTrend(trend).toLowerCase().startsWith("up") ? "&uarr;" : "&darr;";
 }
 
-function trendTone(trend) {
+function trendTone(trend, cardId = "") {
   const text = normaliseTrend(trend).toLowerCase();
-  if (text.startsWith("up")) return "positive";
-  if (text.startsWith("down")) return "negative";
+  const lowerIsBetter = lowerIsBetterOverviewIds.has(cardId);
+  if (text.startsWith("up")) return lowerIsBetter ? "negative" : "positive";
+  if (text.startsWith("down")) return lowerIsBetter ? "positive" : "negative";
   return "neutral";
+}
+
+function withOverviewTones(sourceReport) {
+  if (!sourceReport?.overview) return sourceReport;
+  return {
+    ...sourceReport,
+    overview: sourceReport.overview.map((card) => ({ ...card, tone: trendTone(card.trend, card.id) })),
+  };
 }
 
 function normaliseTrend(value) {
@@ -552,7 +562,7 @@ function reportFromSheet(sheet) {
         value: cellValue(sheet, layout.value[0], layout.value[1]),
         numberFormat: cellNumberFormat(sheet, layout.value[0], layout.value[1]),
         trend,
-        tone: trendTone(trend),
+        tone: trendTone(trend, layout.id),
         detail: "Current report",
       };
     }),
@@ -616,7 +626,7 @@ function saveReport(nextReport, sourceName) {
 
 function resetReport() {
   try { window.localStorage.removeItem(storageKey); } catch { /* no-op */ }
-  report = fallbackReport;
+  report = withOverviewTones(fallbackReport);
   state = { section: "overview", week: report.selectedWeek, sourceName: "Published report", isUploaded: false };
   render();
 }

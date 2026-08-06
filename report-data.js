@@ -80,7 +80,7 @@ window.LARDER_REPORT_DATA = {
       "value": 0.5022748828813629,
       "numberFormat": "0.0%",
       "trend": "Down 0.8% vs Last Year",
-      "tone": "negative",
+      "tone": "positive",
       "detail": "Current published report"
     },
     {
@@ -89,7 +89,7 @@ window.LARDER_REPORT_DATA = {
       "value": 0.16961313586329738,
       "numberFormat": "0.0%",
       "trend": "Down 10.5% vs Last Year",
-      "tone": "negative",
+      "tone": "positive",
       "detail": "Current published report"
     },
     {
@@ -98,7 +98,7 @@ window.LARDER_REPORT_DATA = {
       "value": 0.20431179369787728,
       "numberFormat": "0.0%",
       "trend": "Down 8.6% vs Last Year",
-      "tone": "negative",
+      "tone": "positive",
       "detail": "Current published report"
     }
   ],

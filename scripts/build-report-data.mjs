@@ -66,15 +66,18 @@ const sections = [];
 for (const layout of sectionLayouts) sections.push(await section(layout));
 
 const normaliseTrend = (value) => text(value).replace(/^[\u25B2\u25BC\u2191\u2193\s]+/u, "");
+const lowerIsBetterOverviewIds = new Set(["wages", "foh", "chefs"]);
 const card = (id, label, value, trend, numberFormat) => {
   const cleanTrend = normaliseTrend(trend);
+  const trendText = cleanTrend.toLowerCase();
+  const lowerIsBetter = lowerIsBetterOverviewIds.has(id);
   return {
     id,
     label,
     value,
     numberFormat,
     trend: cleanTrend,
-    tone: cleanTrend.toLowerCase().startsWith("up") ? "positive" : cleanTrend.toLowerCase().startsWith("down") ? "negative" : "neutral",
+    tone: trendText.startsWith("up") ? (lowerIsBetter ? "negative" : "positive") : trendText.startsWith("down") ? (lowerIsBetter ? "positive" : "negative") : "neutral",
     detail: "Current published report",
   };
 };

@@ -271,6 +271,7 @@ function sectionIcon(section) {
 function renderMenu() {
   const menuItems = [
     `<button class="menu-item ${state.section === "overview" ? "is-active" : ""}" data-section="overview"><span class="menu-item__icon">⌂</span><span>Overview</span><span class="menu-item__chevron">›</span></button>`,
+    `<button class="menu-item menu-item--update ${state.section === "update-report" ? "is-active" : ""}" data-section="update-report"><span class="menu-item__icon">↥</span><span>Update report</span><span class="menu-item__chevron">›</span></button>`,
     ...report.sections.map((section) => `<button class="menu-item ${state.section === section.id ? "is-active" : ""}" data-section="${section.id}">
       <span class="menu-item__icon accent-${section.accent}">${sectionIcon(section)}</span>
       <span>${escapeHtml(section.label)}</span><span class="menu-item__chevron">›</span>
@@ -311,8 +312,6 @@ function renderOverview() {
       <button class="text-button" type="button" data-action="open-menu">Browse sections <span>&rarr;</span></button>
     </section>
 
-    ${renderUploader()}
-
     <section class="overview-group">
       <div class="section-label"><span></span>Core performance</div>
       <div class="summary-grid summary-grid--feature">${primary.map(renderSummaryCard).join("")}</div>
@@ -328,6 +327,19 @@ function renderOverview() {
       ${report.sections.map((section) => `<button class="quick-link accent-${section.accent}" type="button" data-section="${section.id}">
         <span class="quick-link__icon">${sectionIcon(section)}</span><span>${escapeHtml(section.label)}</span><span>›</span>
       </button>`).join("")}
+    </section>`;
+}
+
+function renderUpdateReport() {
+  return `
+    <section class="update-report-page">
+      <button class="back-link" type="button" data-section="overview">&larr; Overview</button>
+      <div class="page-intro update-report-intro">
+        <p class="eyebrow">WEEKLY REPORT</p>
+        <h2>Update report</h2>
+        <p>Drag in this week’s Excel report to update the figures shown on this device.</p>
+      </div>
+      ${renderUploader()}
     </section>`;
 }
 
@@ -398,7 +410,7 @@ function render() {
   collapseExpandedTable({ restoreFocus: false });
   topWeek.textContent = formatDate(state.week || report.selectedWeek, true).replace(/&mdash;/g, "—");
   renderMenu();
-  app.innerHTML = state.section === "overview" ? renderOverview() : renderSection(getSection(state.section));
+  app.innerHTML = state.section === "overview" ? renderOverview() : state.section === "update-report" ? renderUpdateReport() : renderSection(getSection(state.section));
   attachDynamicListeners();
 }
 
@@ -636,7 +648,7 @@ menuButton.addEventListener("click", openMenu);
 closeMenuButton.addEventListener("click", closeMenu);
 drawerBackdrop.addEventListener("click", closeMenu);
 weekButton.addEventListener("click", () => {
-  changeSection("overview");
+  changeSection("update-report");
   window.setTimeout(() => document.querySelector("#report-uploader")?.focus(), 250);
 });
 document.addEventListener("keydown", (event) => {

@@ -438,6 +438,21 @@ function changeSection(section) {
   app.focus({ preventScroll: true });
 }
 
+function updateExpandedTableViewport() {
+  if (!expandedTable) return;
+  const height = Math.round(window.visualViewport?.height || window.innerHeight);
+  document.documentElement.style.setProperty("--expanded-table-height", `${height}px`);
+}
+
+function resetExpandedTableScroll() {
+  if (!expandedTable) return;
+  expandedTable.scrollTop = 0;
+  window.requestAnimationFrame(() => {
+    updateExpandedTableViewport();
+    if (expandedTable) expandedTable.scrollTop = 0;
+  });
+}
+
 function expandTable(table) {
   if (!table || expandedTable === table) return;
   collapseExpandedTable({ restoreFocus: false });
@@ -445,6 +460,8 @@ function expandTable(table) {
   table.classList.add("is-expanded");
   table.setAttribute("aria-label", "Thirteen-week performance table, full screen view.");
   document.body.classList.add("table-expanded");
+  updateExpandedTableViewport();
+  table.scrollTop = 0;
   table.querySelector("[data-action='collapse-table']")?.focus({ preventScroll: true });
 }
 
@@ -455,6 +472,7 @@ function collapseExpandedTable({ restoreFocus = true } = {}) {
   table.classList.remove("is-expanded");
   table.setAttribute("aria-label", "Thirteen-week performance table. Tap to view full screen.");
   document.body.classList.remove("table-expanded");
+  document.documentElement.style.removeProperty("--expanded-table-height");
   if (restoreFocus && table.isConnected) table.focus({ preventScroll: true });
 }
 
@@ -657,6 +675,10 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key === "Escape" && drawer.classList.contains("is-open")) closeMenu();
+});
+window.visualViewport?.addEventListener("resize", updateExpandedTableViewport);
+window.addEventListener("orientationchange", () => {
+  window.setTimeout(resetExpandedTableScroll, 180);
 });
 
 render();

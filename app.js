@@ -22,12 +22,14 @@ const uploadInput = document.querySelector("#weekly-report-input");
 const sharedReportEndpoint = "/.netlify/functions/report";
 const authEndpoint = "/.netlify/functions/auth";
 const adminEndpoint = "/.netlify/functions/admin";
+const tasksEndpoint = "/.netlify/functions/tasks";
+const activityEndpoint = "/.netlify/functions/activity";
 const sharedReportPollInterval = 60_000;
 const localPreviewMode = location.hostname === "localhost" && new URLSearchParams(location.search).has("local-preview");
 const lowerIsBetterOverviewIds = new Set(["wages", "foh", "chefs", "senior-management"]);
 let report = null;
 let state = {
-  section: "overview",
+  section: "hub",
   week: "",
   sourceName: "",
   isUploaded: false,
@@ -41,12 +43,20 @@ let state = {
   previewUser: null,
   previewAccess: null,
   availableWeeks: [],
+  taskData: null,
+  taskMessage: "",
+  menuMode: "report",
 };
 let expandedTable = null;
 let sharedReportVersion = "";
 let reportPolling = null;
 let localPreviewSource = null;
 let localPreviewModel = null;
+let lastActivityKey = "";
+
+function requestedStartSection() {
+  return new URLSearchParams(location.search).get("open") === "tasks" ? "tasks" : "hub";
+}
 
 const ratioSections = new Set(["overall-gp", "food-gp", "drink-gp", "wages", "foh", "chefs", "cleaners"]);
 const sectionLayouts = [
@@ -332,7 +342,7 @@ function canPublishReport() {
 function renderAuthScreen() {
   const message = state.authMessage ? `<p class="auth-message">${escapeHtml(state.authMessage)}</p>` : "";
   if (state.authMode === "loading") {
-    return `<section class="auth-page"><div class="auth-card"><p class="eyebrow">LARDER WEEKLY REPORT</p><h2>Preparing your secure report</h2><p>Checking your sign-in securely.</p></div></section>`;
+    return `<section class="auth-page"><div class="auth-card"><p class="eyebrow">LARDER INFORMATION HUB</p><h2>Preparing your secure hub</h2><p>Checking your sign-in securely.</p></div></section>`;
   }
   if (state.authMode === "forgot") {
     return `<section class="auth-page"><form class="auth-card" data-auth-form="forgot"><p class="eyebrow">ACCOUNT RECOVERY</p><h2>Reset your password</h2><p>Enter your account email and we will send a secure reset link.</p>${message}<label>Email address<input required name="email" type="email" autocomplete="email" placeholder="you@example.com"></label><button class="auth-submit" type="submit">Send reset link</button><button class="auth-link" type="button" data-auth-mode="login">Back to sign in</button></form></section>`;
@@ -341,14 +351,132 @@ function renderAuthScreen() {
     return `<section class="auth-page"><form class="auth-card" data-auth-form="reset"><p class="eyebrow">CHOOSE A PASSWORD</p><h2>Set your new password</h2><p>Choose a password with at least 12 characters.</p>${message}<label>New password<input required minlength="12" name="password" type="password" autocomplete="new-password"></label><label>Confirm password<input required minlength="12" name="confirmPassword" type="password" autocomplete="new-password"></label><button class="auth-submit" type="submit">Save new password</button></form></section>`;
   }
   if (state.authMode === "invite") {
-    return `<section class="auth-page"><form class="auth-card" data-auth-form="invite"><p class="eyebrow">WELCOME</p><h2>Set up your account</h2><p>Create a password to access the report that has been shared with you.</p>${message}<label>New password<input required minlength="12" name="password" type="password" autocomplete="new-password"></label><label>Confirm password<input required minlength="12" name="confirmPassword" type="password" autocomplete="new-password"></label><button class="auth-submit" type="submit">Activate account</button></form></section>`;
+    return `<section class="auth-page"><form class="auth-card" data-auth-form="invite"><p class="eyebrow">LARDER INFORMATION HUB</p><h2>Set up your account</h2><p>Create a password to access the information shared with you.</p>${message}<label>New password<input required minlength="12" name="password" type="password" autocomplete="new-password"></label><label>Confirm password<input required minlength="12" name="confirmPassword" type="password" autocomplete="new-password"></label><button class="auth-submit" type="submit">Activate account</button></form></section>`;
   }
-  return `<section class="auth-page"><form class="auth-card" data-auth-form="login"><p class="eyebrow">LARDER WEEKLY REPORT</p><h2>Sign in to your report</h2><p>Your report sections are selected by your account administrator.</p>${message}<label>Email address<input required name="email" type="email" autocomplete="email" placeholder="you@example.com"></label><label>Password<input required name="password" type="password" autocomplete="current-password"></label><button class="auth-submit" type="submit">Sign in</button><button class="auth-link" type="button" data-auth-mode="forgot">Forgot your password?</button></form></section>`;
+  return `<section class="auth-page"><form class="auth-card" data-auth-form="login"><p class="eyebrow">LARDER INFORMATION HUB</p><h2>Sign in to your information hub</h2><p>The information available to you is selected by your account administrator.</p>${message}<label>Email address<input required name="email" type="email" autocomplete="email" placeholder="you@example.com"></label><label>Password<input required name="password" type="password" autocomplete="current-password"></label><button class="auth-submit" type="submit">Sign in</button><button class="auth-link" type="button" data-auth-mode="forgot">Forgot your password?</button></form></section>`;
+}
+
+function userFirstName() {
+  const name = plainText(state.user?.name);
+  if (name) return name.split(/\s+/)[0];
+  return plainText(state.user?.email).split("@")[0] || "there";
+}
+
+function renderHub() {
+  const reportAvailable = Boolean(report);
+  const outstandingTasks = Number(state.taskData?.outstandingCount || 0);
+  return `<section class="hub-page">
+    <div class="hub-intro">
+      <p class="eyebrow">LARDER INFORMATION HUB</p>
+      <h2>Welcome, ${escapeHtml(userFirstName())}</h2>
+      <p>Choose an area to view the information tailored for your account.</p>
+    </div>
+    <section class="hub-menu" aria-label="Information hub menu">
+      <button class="hub-menu-card" type="button" data-section="overview">
+        <span class="hub-menu-card__icon" aria-hidden="true">▦</span>
+        <span><strong>Weekly reports</strong><small>${reportAvailable ? "View your personalised weekly performance report" : "Your weekly report will be available here soon"}</small></span>
+        <span class="hub-menu-card__arrow" aria-hidden="true">›</span>
+      </button>
+      <button class="hub-menu-card hub-menu-card--tasks" type="button" data-section="tasks">
+        <span class="hub-menu-card__icon" aria-hidden="true">✓</span>
+        <span><strong>My tasks</strong><small>${outstandingTasks ? `${outstandingTasks} outstanding ${outstandingTasks === 1 ? "task" : "tasks"}` : "View tasks and reminders assigned to you"}</small></span>
+        ${outstandingTasks ? `<b class="hub-menu-card__badge" aria-label="${outstandingTasks} outstanding tasks">${outstandingTasks}</b>` : ""}<span class="hub-menu-card__arrow" aria-hidden="true">›</span>
+      </button>
+      ${canManageUsers() ? `<button class="hub-menu-card hub-menu-card--users" type="button" data-section="users">
+        <span class="hub-menu-card__icon" aria-hidden="true">♙</span>
+        <span><strong>Users</strong><small>Create accounts, manage sign-in access, and review activity</small></span>
+        <span class="hub-menu-card__arrow" aria-hidden="true">›</span>
+      </button>` : ""}
+    </section>
+  </section>`;
+}
+
+function formatDateTime(value) {
+  if (!value) return "No due date";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "No due date";
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
+}
+
+function taskStatusLabel(status) {
+  return ({ open: "To do", awaiting_approval: "Awaiting approval", completed: "Completed", declined: "Needs attention" })[status] || "Task";
+}
+
+function taskStatusClass(status) {
+  return `task-status--${String(status || "open").replace(/[^a-z_]/g, "")}`;
+}
+
+function taskPeopleOptions(selected = []) {
+  const selectedIds = new Set(selected || []);
+  return (state.taskData?.people || []).map((person) => `<label><input type="checkbox" name="watcherIds" value="${escapeHtml(person.id)}" ${selectedIds.has(person.id) ? "checked" : ""}><span>${escapeHtml(person.name)}</span></label>`).join("");
+}
+
+function renderTaskCard(task) {
+  const currentId = state.user?.id;
+  const isAssignee = task.assigneeId === currentId;
+  const canReview = (task.creatorId === currentId || state.taskData?.canManageAll) && task.status === "awaiting_approval";
+  const recurrence = task.recurrence && task.recurrence !== "none" ? `Repeats ${task.recurrence}` : "One-off task";
+  return `<article class="task-card task-card--${escapeHtml(task.status)}">
+    <div class="task-card__heading"><span class="task-status ${taskStatusClass(task.status)}">${escapeHtml(taskStatusLabel(task.status))}</span><span class="task-card__due">Due ${escapeHtml(formatDateTime(task.dueAt))}</span></div>
+    <h3>${escapeHtml(task.title)}</h3>
+    ${task.description ? `<p>${escapeHtml(task.description)}</p>` : ""}
+    <dl class="task-card__details"><div><dt>Assigned to</dt><dd>${escapeHtml(task.assigneeName)}</dd></div><div><dt>Set by</dt><dd>${escapeHtml(task.creatorName)}</dd></div><div><dt>Schedule</dt><dd>${escapeHtml(recurrence)}</dd></div>${task.watcherNames?.length ? `<div><dt>Watching</dt><dd>${escapeHtml(task.watcherNames.join(", "))}</dd></div>` : ""}</dl>
+    ${task.status === "declined" && task.reviewNote ? `<p class="task-card__note"><strong>Review note:</strong> ${escapeHtml(task.reviewNote)}</p>` : ""}
+    ${task.status === "awaiting_approval" && task.completionNote ? `<p class="task-card__note"><strong>Completion note:</strong> ${escapeHtml(task.completionNote)}</p>` : ""}
+    ${isAssignee && ["open", "declined"].includes(task.status) ? `<form class="task-complete-form" data-task-form="complete"><input type="hidden" name="taskId" value="${escapeHtml(task.id)}"><label>Completion note <textarea name="completionNote" rows="2" placeholder="Optional update for the task setter"></textarea></label><button type="submit">Mark completed</button></form>` : ""}
+    ${canReview ? `<form class="task-review-form" data-task-form="review"><input type="hidden" name="taskId" value="${escapeHtml(task.id)}"><label>Review note <textarea name="reviewNote" rows="2" placeholder="Optional feedback"></textarea></label><div><button type="submit" name="decision" value="approve">Accept completion</button><button class="task-decline-button" type="submit" name="decision" value="decline">Decline</button></div></form>` : ""}
+  </article>`;
+}
+
+function renderTaskCreator({ page = false } = {}) {
+  if (!state.taskData?.canCreate) return "";
+  const people = state.taskData.people || [];
+  if (!people.length) return `<section class="task-create ${page ? "task-create--page" : ""}"><p>You have permission to set tasks, but no task recipients have been selected for your account yet.</p></section>`;
+  const form = `<form data-task-form="create">
+    <label>Task title<input required name="title" maxlength="140" placeholder="What needs to be done?"></label>
+    <label>Instructions<textarea name="description" rows="3" maxlength="2000" placeholder="Add any useful detail"></textarea></label>
+    <label>Assign to<select required name="assigneeId"><option value="">Choose a person</option>${people.map((person) => `<option value="${escapeHtml(person.id)}">${escapeHtml(person.name)}</option>`).join("")}</select></label>
+    <label>Due date and time<input required name="dueAt" type="datetime-local"></label>
+    <label>Reminder time<input name="reminderAt" type="datetime-local"><small>Optional — an in-app and phone reminder is sent at this time.</small></label>
+    <label>Repeat<select name="recurrence"><option value="none">Does not repeat</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select><small>The next task is created when this one is accepted.</small></label>
+    <fieldset><legend>Also notify</legend>${taskPeopleOptions()}</fieldset>
+    <button class="auth-submit" type="submit">Set task</button>
+  </form>`;
+  return page ? `<section class="task-create task-create--page">${form}</section>` : `<details class="task-create" open><summary>Set a task</summary>${form}</details>`;
+}
+
+function renderSetTask() {
+  return `<section class="tasks-page">
+    <button class="back-link" type="button" data-section="tasks">&larr; My tasks</button>
+    <div class="page-intro"><p class="eyebrow">LARDER INFORMATION HUB</p><h2>Set a task</h2><p>Assign a task, choose its reminders, and decide whether it repeats.</p></div>
+    ${renderTaskCreator({ page: true })}
+  </section>`;
+}
+
+function renderTasks() {
+  const taskData = state.taskData;
+  if (!taskData) return `<section class="loading">Loading your tasks…</section>`;
+  const tasks = taskData.tasks || [];
+  const myTasks = tasks.filter((task) => task.assigneeId === state.user?.id && task.status !== "completed");
+  const awaitingReview = tasks.filter((task) => task.status === "awaiting_approval" && (task.creatorId === state.user?.id || taskData.canManageAll));
+  const completed = tasks.filter((task) => task.status === "completed" && (task.assigneeId === state.user?.id || task.creatorId === state.user?.id));
+  const notifications = taskData.notifications || [];
+  const unreadNotifications = notifications.filter((note) => !note.readAt).length;
+  return `<section class="tasks-page">
+    <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
+    <div class="page-intro"><p class="eyebrow">LARDER INFORMATION HUB</p><h2>My tasks</h2><p>Keep on top of tasks assigned to you, and send tasks where your account allows it.</p></div>
+    <section class="task-summary"><div><strong>${taskData.outstandingCount || 0}</strong><span>Outstanding</span></div><div><strong>${awaitingReview.length}</strong><span>Awaiting approval</span></div><div class="task-summary__actions">${taskData.canCreate ? '<button type="button" data-section="set-task">Set a task</button>' : ""}<button type="button" data-action="enable-phone-notifications">Enable phone reminders</button></div></section>
+    ${state.taskMessage ? `<p class="task-message">${escapeHtml(state.taskMessage)}</p>` : ""}
+    <section class="task-list-section"><div class="section-label"><span></span>Tasks for you</div>${myTasks.length ? `<div class="task-list">${myTasks.map(renderTaskCard).join("")}</div>` : '<p class="task-empty">You have no outstanding tasks.</p>'}</section>
+    ${awaitingReview.length ? `<section class="task-list-section"><div class="section-label"><span></span>Ready for your review</div><div class="task-list">${awaitingReview.map(renderTaskCard).join("")}</div></section>` : ""}
+    ${completed.length ? `<section class="task-list-section"><div class="section-label"><span></span>Recently completed</div><div class="task-list">${completed.slice(0, 8).map(renderTaskCard).join("")}</div></section>` : ""}
+    <section class="task-notifications"><div class="task-notifications__heading"><div class="section-label"><span></span>Updates</div>${unreadNotifications ? `<button type="button" data-action="mark-task-notifications-read">Mark all read</button>` : ""}</div>${notifications.length ? `<div>${notifications.slice(0, 12).map((note) => `<article class="task-notification ${note.readAt ? "" : "is-unread"}"><strong>${escapeHtml(note.title)}</strong><span>${escapeHtml(note.message)}</span><small>${escapeHtml(formatDateTime(note.createdAt))}</small></article>`).join("")}</div>` : '<p class="task-empty">Task updates will appear here.</p>'}</section>
+  </section>`;
 }
 
 function renderNoReport() {
   if (canPublishReport()) return renderUpdateReport();
-  return `<section class="auth-page"><div class="auth-card"><p class="eyebrow">WEEKLY REPORT</p><h2>Your account is ready</h2><p>There is no weekly report published yet. An Admin or Owner will upload it shortly.</p><button class="auth-link" type="button" data-action="sign-out">Sign out</button></div></section>`;
+  return `<section class="auth-page"><div class="auth-card"><p class="eyebrow">WEEKLY REPORTS</p><h2>Your account is ready</h2><p>There is no weekly report published yet. An Admin or Owner will upload it shortly.</p><button class="auth-link" type="button" data-section="hub">Back to Information Hub</button><button class="auth-link" type="button" data-action="sign-out">Sign out</button></div></section>`;
 }
 
 function renderPreviewBanner() {
@@ -357,7 +485,7 @@ function renderPreviewBanner() {
 }
 
 function renderSensitiveAccessCheck() {
-  if (state.access?.role === "admin") return "";
+  if (state.access?.role === "admin") return state.adminMessage ? `<p class="admin-action-message">${escapeHtml(state.adminMessage)}</p>` : "";
   return `<form class="sensitive-access" data-auth-form="reauthenticate"><p><strong>Confirm it is you</strong><span>Enter your own account password before changing users or publishing a report. Confirmation lasts five minutes.</span></p><label>Your password<input required name="password" type="password" autocomplete="current-password"></label><button type="submit">Confirm</button><small class="sensitive-access__message">${escapeHtml(state.adminMessage || "")}</small></form>`;
 }
 
@@ -446,38 +574,135 @@ function renderPreviewButton(person) {
   return `<button class="preview-report-button" type="button" data-action="preview-user" data-user-id="${escapeHtml(person.id)}" data-user-name="${escapeHtml(name)}">View ${escapeHtml(name)}’s report</button>`;
 }
 
+function taskPeopleForEditor(excludeUserId = "") {
+  return (state.adminUsers || []).filter((person) => person.enabled && person.id !== excludeUserId);
+}
+
+function renderTaskAccessEditor(savedAccess = null, excludeUserId = "") {
+  const access = savedAccess || { canCreate: false, assigneeIds: [] };
+  const selected = new Set(access.assigneeIds || []);
+  const people = taskPeopleForEditor(excludeUserId);
+  return `<details class="permission-area task-permission-area"><summary>Task permissions</summary><label class="permission-toggle"><input type="checkbox" name="taskCanCreate" ${access.canCreate ? "checked" : ""}><span>Can set tasks</span></label><div class="permission-field-group"><strong>May assign tasks to</strong>${people.length ? `<div class="permission-options">${people.map((person) => `<label><input type="checkbox" name="taskAssigneeIds" value="${escapeHtml(person.id)}" ${selected.has(person.id) ? "checked" : ""}><span>${escapeHtml(person.name || person.email)}</span></label>`).join("")}</div>` : '<p class="permission-empty">Create or enable another account first, then choose who this person can assign tasks to.</p>'}</div><p class="permission-date-note">Task setters can only assign tasks to the people ticked here. Admins and Owners always have full task access.</p></details>`;
+}
+
 function renderAdmin() {
   const users = state.adminUsers;
-  const isAdmin = state.access?.role === "admin";
   return `<section class="admin-page">
-    <button class="back-link" type="button" data-section="overview">&larr; Overview</button>
-    <div class="page-intro"><p class="eyebrow">ADMIN CONTROL CENTRE</p><h2>People and report access</h2><p>Set each Viewer’s permitted report dates, overview cards, and detailed figures. Owners always receive the complete report.</p></div>
+    <button class="back-link" type="button" data-section="overview">&larr; Weekly reports</button>
+    <div class="page-intro"><p class="eyebrow">WEEKLY REPORTS</p><h2>Report viewing permissions</h2><p>Choose the report-ending dates, overview cards, sections, headings, and figures each Viewer can see. Account setup and activity are managed in Users.</p></div>
     ${renderSensitiveAccessCheck()}
-    <section class="admin-create"><h3>Add a person</h3><form data-admin-form="create"><label>Name<input name="name" autocomplete="name" placeholder="Optional"></label><label>Email address<input required name="email" type="email" autocomplete="email" placeholder="person@example.com"></label><label>Temporary password<input required minlength="12" name="password" type="password" autocomplete="new-password" placeholder="At least 12 characters"></label><label>Role<select name="role"><option value="viewer">Viewer</option>${isAdmin ? '<option value="owner">Owner</option>' : ""}</select></label>${renderAccessEditor(null, permissionSections().map((section) => section.id))}<button class="auth-submit" type="submit">Create account</button></form></section>
-    <section class="admin-people"><div class="section-label"><span></span>People with access</div>${users === null ? '<p class="admin-loading">Loading people…</p>' : users.map((person) => renderAdminUser(person, isAdmin)).join("")}</section>
+    <section class="admin-people"><div class="section-label"><span></span>People and report access</div>${users === null ? '<p class="admin-loading">Loading people…</p>' : users.map(renderReportAccessUser).join("")}</section>
   </section>`;
 }
 
-function renderAdminUser(person, isAdmin) {
+function formatActivityTime(value) {
+  if (!value) return "No activity recorded yet";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "No activity recorded yet";
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
+}
+
+function renderUserActivitySummary(person) {
+  const activity = person.activity || {};
+  return `<div class="user-activity__summary"><span><b>${Number(activity.appViews || 0)}</b> app ${Number(activity.appViews || 0) === 1 ? "visit" : "visits"}</span><span>Last activity: ${escapeHtml(formatActivityTime(activity.lastViewedAt || person.lastSignInAt))}</span></div>`;
+}
+
+function renderUserActivity(person) {
+  const activity = person.activity || {};
+  const recent = Array.isArray(activity.recentViews) ? activity.recentViews.slice(0, 5) : [];
+  return `<section class="user-activity">${renderUserActivitySummary(person)}${recent.length ? `<details open><summary>Recent views</summary><ul>${recent.map((item) => `<li><strong>${escapeHtml(item.label)}</strong><span>${escapeHtml(formatActivityTime(item.at))}</span></li>`).join("")}</ul></details>` : '<p>No Hub activity has been recorded for this account yet.</p>'}</section>`;
+}
+
+function renderUsers() {
+  const users = state.adminUsers;
+  const isAdmin = state.access?.role === "admin";
+  return `<section class="admin-page users-page">
+    <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
+    <div class="page-intro"><p class="eyebrow">ACCOUNT MANAGEMENT</p><h2>Users</h2><p>Create accounts, manage who can sign in, and review how people are using the Information Hub. Report viewing permissions are set separately in Weekly reports.</p></div>
+    <button class="activity-page-button" type="button" data-section="activity"><span>◷</span> View recent activity</button>
+    ${renderSensitiveAccessCheck()}
+    <section class="admin-create"><h3>Add a user</h3><form data-account-form="create"><label>Name<input name="name" autocomplete="name" placeholder="Optional"></label><label>Email address<input required name="email" type="email" autocomplete="email" placeholder="person@example.com"></label><label>Temporary password<input required minlength="12" name="password" type="password" autocomplete="new-password" placeholder="At least 12 characters"></label><label>Role<select name="role"><option value="viewer">Viewer</option>${isAdmin ? '<option value="owner">Owner</option>' : ""}</select></label><p class="account-setup-note">New Viewers have no report content until their viewing permissions are selected in Weekly reports.</p><button class="auth-submit" type="submit">Create account</button></form></section>
+    <section class="admin-people"><div class="section-label"><span></span>Accounts and activity</div>${users === null ? '<p class="admin-loading">Loading accounts…</p>' : users.map((person) => renderUserAccount(person, isAdmin)).join("")}</section>
+  </section>`;
+}
+
+function renderActivity() {
+  const users = state.adminUsers;
+  return `<section class="admin-page activity-page">
+    <button class="back-link" type="button" data-section="users">&larr; Users</button>
+    <div class="page-intro"><p class="eyebrow">ACCOUNT ACTIVITY</p><h2>Recent activity</h2><p>See how often each person has opened the Information Hub and the most recent areas they have viewed.</p></div>
+    <section class="admin-people"><div class="section-label"><span></span>Activity by account</div>${users === null ? '<p class="admin-loading">Loading account activity…</p>' : users.map((person) => `<article class="admin-user-card activity-user-card"><div><strong>${escapeHtml(person.name || person.email)}</strong><span>${escapeHtml(person.email)} · ${escapeHtml(person.role)}</span></div>${renderUserActivity(person)}</article>`).join("")}</section>
+  </section>`;
+}
+
+function renderTaskAdmin() {
+  const users = state.adminUsers;
+  return `<section class="admin-page task-admin-page">
+    <button class="back-link" type="button" data-section="tasks">&larr; My tasks</button>
+    <div class="page-intro"><p class="eyebrow">TASK ADMIN CONTROL CENTRE</p><h2>Task permissions</h2><p>Choose who can set tasks and exactly who they are allowed to assign tasks to. Admins and Owners always have full task access.</p></div>
+    ${renderSensitiveAccessCheck()}
+    <section class="admin-people"><div class="section-label"><span></span>People and task access</div>${users === null ? '<p class="admin-loading">Loading people…</p>' : users.map((person) => {
+      if (person.role === "admin" || person.role === "owner") return `<article class="admin-user-card task-admin-user-card"><div><strong>${escapeHtml(person.name || person.email)}</strong><span>${escapeHtml(person.email)}</span></div><p>${person.role === "admin" ? "Admin" : "Owner"} · Full task access</p></article>`;
+      return `<form class="admin-user-card task-admin-user-card" data-task-admin-form><input type="hidden" name="userId" value="${escapeHtml(person.id)}"><div><strong>${escapeHtml(person.name || person.email)}</strong><span>${escapeHtml(person.email)}</span></div>${renderTaskAccessEditor(person.taskAccess, person.id)}<div class="admin-user-card__actions"><button type="submit">Save task permissions</button></div></form>`;
+    }).join("")}</section>
+  </section>`;
+}
+
+function renderReportAccessUser(person) {
+  const fullAccess = person.role === "admin" || person.role === "owner";
+  if (fullAccess) return `<article class="admin-user-card"><div><strong>${escapeHtml(person.name || person.email)}</strong><span>${escapeHtml(person.email)}</span></div><p>${person.isInitialAdmin ? "Primary administrator" : "Owner account"} · Full report access</p>${renderPreviewButton(person)}</article>`;
+  return `<form class="admin-user-card" data-report-access-form><input type="hidden" name="userId" value="${escapeHtml(person.id)}"><div class="admin-user-card__identity"><strong>${escapeHtml(person.name || person.email)}</strong><span>${escapeHtml(person.email)}</span></div>${renderAccessEditor(person.view, person.sections, false, person.dateAccess)}<div class="admin-user-card__actions">${renderPreviewButton(person)}<button type="submit">Save report permissions</button></div></form>`;
+}
+
+function renderUserAccount(person, isAdmin) {
   const canEdit = !person.isInitialAdmin && (isAdmin || person.role === "viewer");
-  if (!canEdit) return `<article class="admin-user-card"><div><strong>${escapeHtml(person.name || person.email)}</strong><span>${escapeHtml(person.email)}</span></div><p>${person.isInitialAdmin ? "Primary administrator" : "Owner account"} · Full report access</p>${renderPreviewButton(person)}</article>`;
+  const activity = renderUserActivitySummary(person);
+  if (!canEdit) return `<article class="admin-user-card user-account-card"><div><strong>${escapeHtml(person.name || person.email)}</strong><span>${escapeHtml(person.email)}</span></div><p>${person.isInitialAdmin ? "Primary administrator" : "Owner account"} · Full account access</p>${activity}</article>`;
   const owner = person.role === "owner";
-  return `<form class="admin-user-card" data-admin-form="update"><input type="hidden" name="userId" value="${escapeHtml(person.id)}"><div class="admin-user-card__identity"><label>Name<input name="name" value="${escapeHtml(person.name || "")}" autocomplete="name"></label><span>${escapeHtml(person.email)}</span></div><div class="admin-user-card__controls"><label>Role<select name="role"><option value="viewer" ${!owner ? "selected" : ""}>Viewer</option>${isAdmin ? `<option value="owner" ${owner ? "selected" : ""}>Owner</option>` : ""}</select></label><label class="admin-toggle"><input name="enabled" type="checkbox" ${person.enabled ? "checked" : ""}><span>Can sign in</span></label></div>${owner ? '<p class="permission-owner">Owners always see the complete report.</p>' : renderAccessEditor(person.view, person.sections, false, person.dateAccess)}<div class="admin-user-card__actions">${renderPreviewButton(person)}<button type="submit">Save access</button></div></form>`;
+  return `<form class="admin-user-card user-account-card" data-account-form="update"><input type="hidden" name="userId" value="${escapeHtml(person.id)}"><div class="admin-user-card__identity"><label>Name<input name="name" value="${escapeHtml(person.name || "")}" autocomplete="name"></label><span>${escapeHtml(person.email)}</span></div><div class="admin-user-card__controls"><label>Role<select name="role"><option value="viewer" ${!owner ? "selected" : ""}>Viewer</option>${isAdmin ? `<option value="owner" ${owner ? "selected" : ""}>Owner</option>` : ""}</select></label><label class="admin-toggle"><input name="enabled" type="checkbox" ${person.enabled ? "checked" : ""}><span>Can sign in</span></label></div>${activity}<div class="admin-user-card__actions"><button type="submit">Save account</button></div></form>`;
 }
 
 function renderMenu() {
+  const inTaskArea = state.menuMode === "tasks";
+  if (inTaskArea) {
+    const taskMenuItems = [
+      `<button class="menu-item" data-section="hub"><span class="menu-item__icon">⌂</span><span>Information Hub</span><span class="menu-item__chevron">›</span></button>`,
+      `<button class="menu-item ${state.section === "tasks" ? "is-active" : ""}" data-section="tasks"><span class="menu-item__icon">✓</span><span>My tasks${state.taskData?.outstandingCount ? ` <b class="menu-item__badge">${state.taskData.outstandingCount}</b>` : ""}</span><span class="menu-item__chevron">›</span></button>`,
+      ...(state.taskData?.canCreate ? [`<button class="menu-item ${state.section === "set-task" ? "is-active" : ""}" data-section="set-task"><span class="menu-item__icon">+</span><span>Set a task</span><span class="menu-item__chevron">›</span></button>`] : []),
+    ];
+    if (canManageUsers() && !state.previewUser) {
+      taskMenuItems.push(`<button class="menu-item menu-item--admin ${state.section === "admin" ? "is-active" : ""}" data-section="admin"><span class="menu-item__icon">⚙</span><span>Admin control centre</span><span class="menu-item__chevron">›</span></button>`);
+    }
+    sectionMenu.innerHTML = taskMenuItems.join("");
+    const taskFooter = document.querySelector(".drawer-footer");
+    if (taskFooter) taskFooter.innerHTML = `<span>${escapeHtml(state.user?.email || "")}</span><button type="button" data-action="sign-out">Sign out</button>`;
+    return;
+  }
+  const inUserArea = state.menuMode === "users";
+  if (inUserArea) {
+    const userMenuItems = [
+      `<button class="menu-item" data-section="hub"><span class="menu-item__icon">⌂</span><span>Information Hub</span><span class="menu-item__chevron">›</span></button>`,
+      `<button class="menu-item ${state.section === "users" ? "is-active" : ""}" data-section="users"><span class="menu-item__icon">♙</span><span>Users</span><span class="menu-item__chevron">›</span></button>`,
+      `<button class="menu-item ${state.section === "activity" ? "is-active" : ""}" data-section="activity"><span class="menu-item__icon">◷</span><span>Recent activity</span><span class="menu-item__chevron">›</span></button>`,
+    ];
+    sectionMenu.innerHTML = userMenuItems.join("");
+    const userFooter = document.querySelector(".drawer-footer");
+    if (userFooter) userFooter.innerHTML = `<span>${escapeHtml(state.user?.email || "")}</span><button type="button" data-action="sign-out">Sign out</button>`;
+    return;
+  }
   const menuItems = [
-    `<button class="menu-item ${state.section === "overview" ? "is-active" : ""}" data-section="overview"><span class="menu-item__icon">⌂</span><span>Overview</span><span class="menu-item__chevron">›</span></button>`,
-    `<button class="menu-item menu-item--update ${state.section === "update-report" ? "is-active" : ""}" data-section="update-report"><span class="menu-item__icon">↥</span><span>Update report</span><span class="menu-item__chevron">›</span></button>`,
+    `<button class="menu-item ${state.section === "hub" ? "is-active" : ""}" data-section="hub"><span class="menu-item__icon">⌂</span><span>Information Hub</span><span class="menu-item__chevron">›</span></button>`,
+    `<button class="menu-item ${state.section === "overview" ? "is-active" : ""}" data-section="overview"><span class="menu-item__icon">▦</span><span>Weekly reports</span><span class="menu-item__chevron">›</span></button>`,
+    ...(canManageUsers() && !state.previewUser ? [
+      `<button class="menu-item ${state.section === "users" ? "is-active" : ""}" data-section="users"><span class="menu-item__icon">♙</span><span>Users</span><span class="menu-item__chevron">›</span></button>`,
+      `<button class="menu-item menu-item--admin ${state.section === "admin" ? "is-active" : ""}" data-section="admin"><span class="menu-item__icon">⚙</span><span>Report viewing permissions</span><span class="menu-item__chevron">›</span></button>`,
+    ] : []),
+    ...(canPublishReport() && !state.previewUser ? [`<button class="menu-item menu-item--update ${state.section === "update-report" ? "is-active" : ""}" data-section="update-report"><span class="menu-item__icon">↥</span><span>Update report</span><span class="menu-item__chevron">›</span></button>`] : []),
     ...(report?.sections || []).map((section) => `<button class="menu-item ${state.section === section.id ? "is-active" : ""}" data-section="${section.id}">
       <span class="menu-item__icon accent-${section.accent}">${sectionIcon(section)}</span>
       <span>${escapeHtml(section.label)}</span><span class="menu-item__chevron">›</span>
     </button>`),
   ];
-  if (!canPublishReport() || state.previewUser) menuItems.splice(1, 1);
-  if (canManageUsers() && !state.previewUser) {
-    menuItems.splice(1, 0, `<button class="menu-item menu-item--admin ${state.section === "admin" ? "is-active" : ""}" data-section="admin"><span class="menu-item__icon">⚙</span><span>Admin control centre</span><span class="menu-item__chevron">›</span></button>`);
-  }
   sectionMenu.innerHTML = menuItems.join("");
   const footer = document.querySelector(".drawer-footer");
   if (footer) footer.innerHTML = `<span>${escapeHtml(state.user?.email || "")}</span><button type="button" data-action="sign-out">Sign out</button>`;
@@ -563,7 +788,7 @@ function renderOverview() {
     </section>` : `<section class="error-state"><p class="eyebrow">NO SECTIONS SELECTED</p><h2>Ask an Admin or Owner to choose the report sections for this account.</h2></section>`;
   return `
     <section class="page-intro overview-intro">
-      <p class="eyebrow">WEEKLY PERFORMANCE REPORT</p>
+      <p class="eyebrow">WEEKLY REPORTS</p>
       <h2>At a glance</h2>
     </section>
 
@@ -672,10 +897,10 @@ function render() {
   }
   topWeek.textContent = report ? formatDate(state.week || report.selectedWeek, true).replace(/&mdash;/g, "—") : "No report yet";
   renderMenu();
-  const page = !report ? (state.section === "admin" ? renderAdmin() : renderNoReport()) : state.section === "overview" ? renderOverview() : state.section === "update-report" ? renderUpdateReport() : state.section === "admin" ? renderAdmin() : renderSection(getSection(state.section));
+  const page = state.section === "hub" ? renderHub() : state.section === "tasks" ? renderTasks() : state.section === "set-task" ? renderSetTask() : state.section === "users" ? renderUsers() : state.section === "activity" ? renderActivity() : state.section === "admin" ? (state.menuMode === "tasks" ? renderTaskAdmin() : renderAdmin()) : !report ? renderNoReport() : state.section === "overview" ? renderOverview() : state.section === "update-report" ? renderUpdateReport() : renderSection(getSection(state.section));
   app.innerHTML = `${renderPreviewBanner()}${page}`;
   attachDynamicListeners();
-  if (state.section === "admin" && state.adminUsers === null) void loadAdminUsers();
+  if ((state.section === "admin" || state.section === "users" || state.section === "activity") && state.adminUsers === null) void loadAdminUsers();
 }
 
 function openMenu() {
@@ -695,12 +920,20 @@ function closeMenu() {
 }
 
 function changeSection(section) {
-  const permitted = section === "overview"
+  const permitted = section === "hub"
+    || section === "tasks"
+    || (section === "set-task" && Boolean(state.taskData?.canCreate))
+    || (section === "users" && canManageUsers() && !state.previewUser)
+    || (section === "activity" && canManageUsers() && !state.previewUser)
+    || section === "overview"
     || (section === "update-report" && canPublishReport() && !state.previewUser)
     || (section === "admin" && canManageUsers() && !state.previewUser)
     || report?.sections.some((item) => item.id === section);
   if (!permitted) return;
-  state.section = section;
+  const taskRoute = section === "tasks" || section === "set-task";
+  const userRoute = section === "users" || section === "activity";
+  state = { ...state, section, menuMode: taskRoute ? "tasks" : userRoute ? "users" : section === "admin" ? state.menuMode : "report" };
+  recordSectionActivity(section);
   closeMenu();
   render();
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -714,8 +947,33 @@ function formValue(form, name) {
 function authFailure(message) {
   report = null;
   sharedReportVersion = "";
+  lastActivityKey = "";
   state = { ...state, authMode: "login", authMessage: message, user: null, access: null };
   render();
+}
+
+function recordActivity(kind, detail = "") {
+  if (localPreviewMode || !state.user?.id) return;
+  const key = `${kind}|${detail}`;
+  if (key === lastActivityKey) return;
+  lastActivityKey = key;
+  void fetch(activityEndpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, detail }),
+  }).catch(() => { lastActivityKey = ""; });
+}
+
+function recordSectionActivity(section) {
+  if (section === "hub") return recordActivity("hub");
+  if (section === "tasks" || section === "set-task") return recordActivity("tasks");
+  if (section === "users") return recordActivity("users");
+  if (section === "activity") return recordActivity("user-activity");
+  if (section === "admin") return recordActivity("report-permissions");
+  if (section === "update-report") return recordActivity("report-update");
+  if (section === "overview") return recordActivity("report-overview", formatDate(report?.selectedWeek || state.week));
+  const reportSection = getSection(section);
+  if (reportSection) return recordActivity("report-section", `${reportSection.label} · ${formatDate(report?.selectedWeek || state.week)}`);
 }
 
 async function loadAccessProfile() {
@@ -741,15 +999,18 @@ async function beginSignedInExperience() {
       return;
     }
     state = { ...state, user: profile.user, access: profile.access };
+    recordActivity("app-open");
     const loaded = await loadSharedReport();
     if (!state.user) return;
     if (!loaded) {
-      state = { ...state, authMode: "authenticated", section: canPublishReport() ? "update-report" : "overview", authMessage: "" };
+      state = { ...state, authMode: "authenticated", section: requestedStartSection(), authMessage: "" };
+      void loadTasks({ renderAfterLoad: false });
       render();
       if (!reportPolling) reportPolling = window.setInterval(() => { if (!state.previewUser) void loadSharedReport({ renderAfterLoad: true, week: report?.selectedWeek || "" }); }, sharedReportPollInterval);
       return;
     }
-    state = { ...state, authMode: "authenticated", authMessage: "" };
+    state = { ...state, authMode: "authenticated", section: requestedStartSection(), authMessage: "" };
+    void loadTasks({ renderAfterLoad: false });
     render();
     if (!reportPolling) reportPolling = window.setInterval(() => { if (!state.previewUser) void loadSharedReport({ renderAfterLoad: true, week: report?.selectedWeek || "" }); }, sharedReportPollInterval);
   } catch (error) {
@@ -836,7 +1097,181 @@ async function loadAdminUsers() {
   } catch (error) {
     state = { ...state, adminUsers: [], adminMessage: error.message || "People could not be loaded." };
   }
-  if (state.section === "admin") render();
+  if (state.section === "admin" || state.section === "users" || state.section === "activity") render();
+}
+
+function updateTaskBadge(count = 0) {
+  if (typeof navigator === "undefined") return;
+  if (count > 0 && typeof navigator.setAppBadge === "function") void navigator.setAppBadge(count).catch(() => {});
+  if (!count && typeof navigator.clearAppBadge === "function") void navigator.clearAppBadge().catch(() => {});
+}
+
+function applyTaskData(taskData, message = state.taskMessage) {
+  state = { ...state, taskData, taskMessage: message };
+  updateTaskBadge(Number(taskData?.outstandingCount || 0));
+}
+
+async function loadTasks({ renderAfterLoad = true } = {}) {
+  if (localPreviewMode || !isSignedIn()) return;
+  try {
+    const response = await fetch(tasksEndpoint, { cache: "no-store", headers: { Accept: "application/json" } });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Your tasks could not be loaded.");
+    applyTaskData(payload, "");
+  } catch (error) {
+    state = { ...state, taskMessage: error.message || "Your tasks could not be loaded." };
+  }
+  if (renderAfterLoad && (state.section === "hub" || state.section === "tasks")) render();
+}
+
+function taskBodyFromForm(form, submitter) {
+  const data = new FormData(form);
+  const asIso = (value) => {
+    const date = new Date(String(value || ""));
+    return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+  };
+  return {
+    action: form.dataset.taskForm,
+    taskId: plainText(data.get("taskId")),
+    title: plainText(data.get("title")),
+    description: plainText(data.get("description")),
+    assigneeId: plainText(data.get("assigneeId")),
+    watcherIds: data.getAll("watcherIds").map(String),
+    dueAt: asIso(data.get("dueAt")),
+    reminderAt: asIso(data.get("reminderAt")),
+    recurrence: plainText(data.get("recurrence")),
+    completionNote: plainText(data.get("completionNote")),
+    reviewNote: plainText(data.get("reviewNote")),
+    decision: submitter?.value || plainText(data.get("decision")),
+  };
+}
+
+function countOutstandingTasks(tasks) {
+  return (tasks || []).filter((task) => task.assigneeId === state.user?.id && ["open", "declined"].includes(task.status)).length;
+}
+
+function addLocalTaskNotification(taskData, title, message) {
+  taskData.notifications = [{ id: `local-note-${Date.now()}`, taskId: "", title, message, createdAt: new Date().toISOString(), readAt: "" }, ...(taskData.notifications || [])].slice(0, 50);
+}
+
+function submitLocalTask(body) {
+  const taskData = structuredClone(state.taskData || { tasks: [], people: [], notifications: [], canCreate: true, canManageAll: true });
+  const currentName = state.user?.name || state.user?.email || "You";
+  if (body.action === "create") {
+    const assignee = taskData.people.find((person) => person.id === body.assigneeId);
+    if (!body.title || !assignee || !body.dueAt) {
+      state = { ...state, taskMessage: "Add a title, person, and due date before setting the task." };
+      render();
+      return;
+    }
+    const watchers = taskData.people.filter((person) => body.watcherIds.includes(person.id) && person.id !== assignee.id);
+    taskData.tasks.unshift({ id: `local-task-${Date.now()}`, title: body.title, description: body.description, assigneeId: assignee.id, assigneeName: assignee.name, creatorId: state.user.id, creatorName: currentName, watcherIds: watchers.map((person) => person.id), watcherNames: watchers.map((person) => person.name), dueAt: body.dueAt, reminders: body.reminderAt ? [{ at: body.reminderAt, sentAt: "" }] : [], recurrence: body.recurrence || "none", status: "open", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), completionNote: "", reviewNote: "" });
+    addLocalTaskNotification(taskData, body.title, `Task assigned to ${assignee.name}.`);
+  } else {
+    const task = taskData.tasks.find((item) => item.id === body.taskId);
+    if (!task) return;
+    if (body.action === "complete") {
+      task.status = "awaiting_approval";
+      task.completionNote = body.completionNote;
+      task.updatedAt = new Date().toISOString();
+      addLocalTaskNotification(taskData, task.title, "Marked completed and sent for approval.");
+    }
+    if (body.action === "review") {
+      const approved = body.decision === "approve";
+      task.status = approved ? "completed" : "declined";
+      task.reviewNote = body.reviewNote;
+      task.updatedAt = new Date().toISOString();
+      addLocalTaskNotification(taskData, task.title, approved ? "Completion accepted." : "Completion declined.");
+    }
+  }
+  taskData.outstandingCount = countOutstandingTasks(taskData.tasks);
+  applyTaskData(taskData, body.action === "create" ? "Task set." : body.action === "complete" ? "Task sent for approval." : "Task review saved.");
+  render();
+}
+
+async function submitTaskForm(form, submitter) {
+  const body = taskBodyFromForm(form, submitter);
+  if (localPreviewMode) {
+    submitLocalTask(body);
+    return;
+  }
+  state = { ...state, taskMessage: body.action === "create" ? "Setting task…" : "Saving task update…" };
+  render();
+  try {
+    const response = await fetch(tasksEndpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "The task could not be saved.");
+    applyTaskData(payload, body.action === "create" ? "Task set and notifications sent." : body.action === "complete" ? "Task sent for approval." : "Task review saved.");
+  } catch (error) {
+    state = { ...state, taskMessage: error.message || "The task could not be saved." };
+  }
+  render();
+}
+
+async function markTaskNotificationsRead() {
+  if (localPreviewMode) {
+    const taskData = structuredClone(state.taskData || {});
+    taskData.notifications?.forEach((note) => { note.readAt = new Date().toISOString(); });
+    applyTaskData(taskData, "");
+    render();
+    return;
+  }
+  try {
+    const response = await fetch(tasksEndpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "mark-notifications-read" }) });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Task updates could not be marked as read.");
+    applyTaskData(payload, "");
+  } catch (error) {
+    state = { ...state, taskMessage: error.message || "Task updates could not be marked as read." };
+  }
+  render();
+}
+
+function vapidKeyToBytes(value) {
+  const padded = String(value || "").replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(String(value || "").length / 4) * 4, "=");
+  const decoded = atob(padded);
+  return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+}
+
+async function enablePhoneNotifications() {
+  if (localPreviewMode) {
+    state = { ...state, taskMessage: "Phone reminders are enabled on the secure live Hub after notification keys are added." };
+    render();
+    return;
+  }
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+    state = { ...state, taskMessage: "This browser does not support phone notifications. You can still see every task in the Hub." };
+    render();
+    return;
+  }
+  const push = state.taskData?.push;
+  if (!push?.enabled || !push.publicKey) {
+    state = { ...state, taskMessage: "Phone reminders are being prepared. Your in-app task updates are already available." };
+    render();
+    return;
+  }
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") throw new Error("Allow notifications in your phone settings to receive task reminders.");
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription() || await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapidKeyToBytes(push.publicKey) });
+    const response = await fetch(tasksEndpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "subscribe", subscription: subscription.toJSON() }) });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Phone reminders could not be enabled.");
+    applyTaskData(payload, "Phone reminders are enabled for this device.");
+  } catch (error) {
+    state = { ...state, taskMessage: error.message || "Phone reminders could not be enabled." };
+  }
+  render();
+}
+
+async function registerTaskServiceWorker() {
+  if (!("serviceWorker" in navigator) || location.protocol !== "https:") return;
+  try {
+    await navigator.serviceWorker.register("/sw.js");
+  } catch (error) {
+    console.warn("The task notification service could not be prepared.", error);
+  }
 }
 
 function accessViewFromForm(form) {
@@ -868,11 +1303,19 @@ function dateAccessFromForm(form) {
   return { scope: "current" };
 }
 
+function taskAccessFromForm(form) {
+  const formData = new FormData(form);
+  return {
+    canCreate: formData.get("taskCanCreate") === "on",
+    assigneeIds: formData.getAll("taskAssigneeIds").map(String),
+  };
+}
+
 function localSectionsFromView(view) {
   return Object.entries(view?.sections || {}).filter(([, selection]) => selection?.enabled).map(([section]) => section);
 }
 
-function localUserWithAccess(current, body) {
+function localUserWithAccount(current, body) {
   const role = body.role === "owner" ? "owner" : "viewer";
   return {
     ...current,
@@ -881,38 +1324,85 @@ function localUserWithAccess(current, body) {
     email: plainText(body.email) || current?.email || "",
     role,
     enabled: body.enabled !== false,
-    sections: localSectionsFromView(body.view),
-    view: role === "owner" ? null : body.view,
-    dateAccess: role === "owner" ? { scope: "all" } : body.dateAccess,
+    sections: role === "owner" ? [] : (current?.sections || []),
+    view: role === "owner" ? null : (current?.view || null),
+    dateAccess: role === "owner" ? { scope: "all" } : (current?.dateAccess || { scope: "current" }),
+    taskAccess: role === "owner" ? { canCreate: true, assigneeIds: ["*"] } : (current?.taskAccess || { canCreate: false, assigneeIds: [] }),
+    activity: current?.activity || { appViews: 0, totalViews: 0, lastViewedAt: "", recentViews: [] },
     isInitialAdmin: false,
   };
 }
 
-async function submitAdminForm(form) {
+async function submitAccountForm(form) {
   const formData = new FormData(form);
-  const action = form.dataset.adminForm;
-  const body = action === "create"
-    ? { action, name: formData.get("name"), email: formData.get("email"), password: formData.get("password"), role: formData.get("role"), view: accessViewFromForm(form), dateAccess: dateAccessFromForm(form) }
-    : { action, userId: formData.get("userId"), name: formData.get("name"), role: formData.get("role"), enabled: formData.get("enabled") === "on", view: accessViewFromForm(form), dateAccess: dateAccessFromForm(form) };
+  const action = form.dataset.accountForm === "create" ? "create-account" : "update-account";
+  const body = action === "create-account"
+    ? { action, name: formData.get("name"), email: formData.get("email"), password: formData.get("password"), role: formData.get("role") }
+    : { action, userId: formData.get("userId"), name: formData.get("name"), role: formData.get("role"), enabled: formData.get("enabled") === "on" };
   if (localPreviewMode) {
     const users = state.adminUsers || [];
-    const nextUsers = action === "create"
-      ? [...users, localUserWithAccess(null, body)]
-      : users.map((person) => String(person.id) === String(body.userId) ? localUserWithAccess(person, body) : person);
-    state = { ...state, adminUsers: nextUsers, adminMessage: action === "create" ? "Local account created for preview only." : "Local access saved. Use View report to check this person’s permissions." };
+    const nextUsers = action === "create-account"
+      ? [...users, localUserWithAccount(null, body)]
+      : users.map((person) => String(person.id) === String(body.userId) ? localUserWithAccount(person, body) : person);
+    state = { ...state, adminUsers: nextUsers, adminMessage: action === "create-account" ? "Local account created for preview only." : "Local account saved." };
     render();
     return;
   }
-  state = { ...state, adminMessage: action === "create" ? "Creating account…" : "Saving access…" };
+  state = { ...state, adminMessage: action === "create-account" ? "Creating account…" : "Saving account…" };
   render();
   try {
     const response = await fetch(adminEndpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const payload = await response.json().catch(() => ({}));
     if (response.status === 428) throw new Error("Confirm your own password above before making this change.");
-    if (!response.ok) throw new Error(payload.error || "The access change could not be saved.");
-    state = { ...state, adminUsers: payload.users || [], adminMessage: action === "create" ? "Account created. Share the temporary password with the person securely." : "Access saved." };
+    if (!response.ok) throw new Error(payload.error || "The account could not be saved.");
+    state = { ...state, adminUsers: payload.users || [], adminMessage: action === "create-account" ? "Account created. Share the temporary password with the person securely." : "Account saved." };
   } catch (error) {
-    state = { ...state, adminMessage: error.message || "The access change could not be saved." };
+    state = { ...state, adminMessage: error.message || "The account could not be saved." };
+  }
+  render();
+}
+
+async function submitReportAccessForm(form) {
+  const body = { action: "update-report-access", userId: formValue(form, "userId"), view: accessViewFromForm(form), dateAccess: dateAccessFromForm(form) };
+  if (localPreviewMode) {
+    const view = body.view;
+    const users = (state.adminUsers || []).map((person) => String(person.id) === String(body.userId) ? { ...person, sections: localSectionsFromView(view), view, dateAccess: body.dateAccess } : person);
+    state = { ...state, adminUsers: users, adminMessage: "Report viewing permissions saved for the local preview." };
+    render();
+    return;
+  }
+  state = { ...state, adminMessage: "Saving report viewing permissions…" };
+  render();
+  try {
+    const response = await fetch(adminEndpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const payload = await response.json().catch(() => ({}));
+    if (response.status === 428) throw new Error("Confirm your own password above before making this change.");
+    if (!response.ok) throw new Error(payload.error || "Report viewing permissions could not be saved.");
+    state = { ...state, adminUsers: payload.users || [], adminMessage: "Report viewing permissions saved." };
+  } catch (error) {
+    state = { ...state, adminMessage: error.message || "Report viewing permissions could not be saved." };
+  }
+  render();
+}
+
+async function submitTaskAdminForm(form) {
+  const body = { action: "update-task-access", userId: formValue(form, "userId"), taskAccess: taskAccessFromForm(form) };
+  if (localPreviewMode) {
+    const users = (state.adminUsers || []).map((person) => String(person.id) === String(body.userId) ? { ...person, taskAccess: body.taskAccess } : person);
+    state = { ...state, adminUsers: users, adminMessage: "Task permissions saved for the local preview." };
+    render();
+    return;
+  }
+  state = { ...state, adminMessage: "Saving task permissions…" };
+  render();
+  try {
+    const response = await fetch(adminEndpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const payload = await response.json().catch(() => ({}));
+    if (response.status === 428) throw new Error("Confirm your own password above before making this change.");
+    if (!response.ok) throw new Error(payload.error || "Task permissions could not be saved.");
+    state = { ...state, adminUsers: payload.users || [], adminMessage: "Task permissions saved." };
+  } catch (error) {
+    state = { ...state, adminMessage: error.message || "Task permissions could not be saved." };
   }
   render();
 }
@@ -930,7 +1420,9 @@ async function signOut() {
   report = null;
   localPreviewModel = null;
   sharedReportVersion = "";
-  state = { section: "overview", week: "", sourceName: "", isUploaded: false, authMode: "login", authMessage: "You have signed out.", authToken: "", user: null, access: null, adminUsers: null, adminMessage: "", availableWeeks: [] };
+  lastActivityKey = "";
+  state = { section: "hub", week: "", sourceName: "", isUploaded: false, authMode: "login", authMessage: "You have signed out.", authToken: "", user: null, access: null, adminUsers: null, adminMessage: "", availableWeeks: [], taskData: null, taskMessage: "", menuMode: "report" };
+  updateTaskBadge(0);
   render();
 }
 
@@ -1010,9 +1502,23 @@ function attachDynamicListeners() {
     event.preventDefault();
     void confirmSensitiveAccess(form);
   }));
-  document.querySelectorAll("[data-admin-form]").forEach((form) => form.addEventListener("submit", (event) => {
+  document.querySelectorAll("[data-task-form]").forEach((form) => form.addEventListener("submit", (event) => {
     event.preventDefault();
-    void submitAdminForm(form);
+    void submitTaskForm(form, event.submitter);
+  }));
+  document.querySelectorAll("[data-action='mark-task-notifications-read']").forEach((button) => button.addEventListener("click", () => { void markTaskNotificationsRead(); }));
+  document.querySelectorAll("[data-action='enable-phone-notifications']").forEach((button) => button.addEventListener("click", () => { void enablePhoneNotifications(); }));
+  document.querySelectorAll("[data-account-form]").forEach((form) => form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void submitAccountForm(form);
+  }));
+  document.querySelectorAll("[data-report-access-form]").forEach((form) => form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void submitReportAccessForm(form);
+  }));
+  document.querySelectorAll("[data-task-admin-form]").forEach((form) => form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void submitTaskAdminForm(form);
   }));
   document.querySelectorAll("[data-action='expand-table']").forEach((table) => {
     table.addEventListener("click", (event) => {
@@ -1070,12 +1576,16 @@ async function changeReportWeek(week) {
     if (!fullReport) return;
     report = withOverviewTones(state.previewAccess ? filterReportForView(fullReport, state.previewAccess) : fullReport);
     state = { ...state, week: report.selectedWeek, calendarOpen: false, calendarMonth: monthKey(report.selectedWeek) };
+    recordSectionActivity(state.section);
     render();
     window.scrollTo({ top: 0, behavior: "smooth" });
     return;
   }
   const loaded = await loadSharedReport({ week, renderAfterLoad: true, previewUserId: state.previewUser?.id || "" });
-  if (loaded) window.scrollTo({ top: 0, behavior: "smooth" });
+  if (loaded) {
+    recordSectionActivity(state.section);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 }
 
 function applySharedReport(payload, { renderAfterLoad = false, preview = false } = {}) {
@@ -1134,6 +1644,8 @@ async function loadSharedReport({ renderAfterLoad = false, previewUserId = "", w
 
 async function previewUserReport(userId) {
   if (!userId || !canManageUsers()) return;
+  const selectedPerson = state.adminUsers?.find((user) => user.id === userId);
+  recordActivity("report-preview", selectedPerson?.name || selectedPerson?.email || "another user");
   if (localPreviewMode) {
     const person = state.adminUsers?.find((user) => user.id === userId);
     if (!person || !localPreviewSource) return;
@@ -1702,6 +2214,7 @@ async function initialiseApplication() {
     authFailure("Open the secure Netlify report link to sign in. Local file previews cannot use account access.");
     return;
   }
+  void registerTaskServiceWorker();
   const hashParameters = new URLSearchParams(window.location.hash.replace(/^#/, ""));
   const inviteToken = hashParameters.get("invite_token") || new URLSearchParams(location.search).get("invite_token");
   const recoveryToken = hashParameters.get("recovery_token") || new URLSearchParams(location.search).get("recovery_token");
@@ -1741,9 +2254,18 @@ async function loadLocalPermissionsPreview() {
     viewerView.sections.sales.fields = ["1", "4", "5", "6", "7", "8", "9", "10"];
     viewerView.sections.covers.fields = ["1", "2", "3", "4", "5", "6", "7"];
     viewerView.sections.wages.fields = ["1", "2", "3", "4", "5", "6"];
+    const previewPeople = [
+      { id: "preview-admin", name: "Admin preview", email: "admin@example.com" },
+      { id: "preview-viewer", name: "Jordan Viewer", email: "jordan@example.com" },
+      { id: "preview-owner", name: "Morgan Owner", email: "morgan@example.com" },
+    ];
+    const previewTasks = [
+      { id: "local-task-1", title: "Check next week’s bookings", description: "Review the bookings report and flag any large tables that need a deposit.", assigneeId: "preview-admin", assigneeName: "Admin preview", creatorId: "preview-owner", creatorName: "Morgan Owner", watcherIds: ["preview-owner"], watcherNames: ["Morgan Owner"], dueAt: new Date(Date.now() + 86_400_000).toISOString(), reminders: [], recurrence: "weekly", status: "open", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), completionNote: "", reviewNote: "" },
+      { id: "local-task-2", title: "Confirm the new menu briefing", description: "Share the final briefing with the front of house team.", assigneeId: "preview-admin", assigneeName: "Admin preview", creatorId: "preview-viewer", creatorName: "Jordan Viewer", watcherIds: [], watcherNames: [], dueAt: new Date(Date.now() + 172_800_000).toISOString(), reminders: [], recurrence: "none", status: "open", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), completionNote: "", reviewNote: "" },
+    ];
     state = {
       ...state,
-      section: "admin",
+      section: "hub",
       week: report.selectedWeek,
       sourceName: "Local preview report",
       availableWeeks: [report.selectedWeek],
@@ -1751,10 +2273,13 @@ async function loadLocalPermissionsPreview() {
       user: { id: "preview-admin", email: "admin@example.com", name: "Admin preview" },
       access: { enabled: true, role: "admin", sections: report.sections.map((section) => section.id), dateAccess: { scope: "all" }, canManageUsers: true, canPublish: true },
       adminUsers: [
-        { id: "preview-viewer", name: "Jordan Viewer", email: "jordan@example.com", role: "viewer", enabled: true, sections: ["sales", "covers", "wages"], view: viewerView, dateAccess: { scope: "current" }, isInitialAdmin: false },
-        { id: "preview-owner", name: "Morgan Owner", email: "morgan@example.com", role: "owner", enabled: true, sections: report.sections.map((section) => section.id), view: null, dateAccess: { scope: "all" }, isInitialAdmin: false },
+        { id: "preview-admin", name: "Admin preview", email: "admin@example.com", role: "admin", enabled: true, sections: report.sections.map((section) => section.id), view: null, dateAccess: { scope: "all" }, taskAccess: { canCreate: true, assigneeIds: ["*"] }, activity: { appViews: 18, lastViewedAt: new Date().toISOString(), recentViews: [{ label: "Weekly reports · 19 July 2026", at: new Date().toISOString() }, { label: "My tasks", at: new Date(Date.now() - 86_400_000).toISOString() }] }, isInitialAdmin: true },
+        { id: "preview-viewer", name: "Jordan Viewer", email: "jordan@example.com", role: "viewer", enabled: true, sections: ["sales", "covers", "wages"], view: viewerView, dateAccess: { scope: "current" }, taskAccess: { canCreate: true, assigneeIds: ["preview-admin"] }, activity: { appViews: 7, lastViewedAt: new Date(Date.now() - 7_200_000).toISOString(), recentViews: [{ label: "Report section · Sales · 19 July 2026", at: new Date(Date.now() - 7_200_000).toISOString() }, { label: "Weekly reports · 19 July 2026", at: new Date(Date.now() - 7_300_000).toISOString() }] }, isInitialAdmin: false },
+        { id: "preview-owner", name: "Morgan Owner", email: "morgan@example.com", role: "owner", enabled: true, sections: report.sections.map((section) => section.id), view: null, dateAccess: { scope: "all" }, taskAccess: { canCreate: true, assigneeIds: ["*"] }, activity: { appViews: 26, lastViewedAt: new Date(Date.now() - 3_600_000).toISOString(), recentViews: [{ label: "Update report", at: new Date(Date.now() - 3_600_000).toISOString() }, { label: "Information Hub", at: new Date(Date.now() - 3_700_000).toISOString() }] }, isInitialAdmin: false },
       ],
+      taskData: { tasks: previewTasks, people: previewPeople, canCreate: true, canManageAll: true, outstandingCount: 2, notifications: [{ id: "local-notification-1", taskId: "local-task-1", title: "Check next week’s bookings", message: "Morgan Owner assigned you a task.", createdAt: new Date().toISOString(), readAt: "" }], push: { enabled: false, publicKey: "" } },
     };
+    updateTaskBadge(2);
     render();
   } catch (error) {
     authFailure(error.message || "The local permissions preview could not be started.");

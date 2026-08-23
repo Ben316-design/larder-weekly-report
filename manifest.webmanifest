@@ -1,6 +1,7 @@
 {
-  "name": "Larder Weekly Performance",
-  "short_name": "Larder Report",
+  "id": "/",
+  "name": "Larder Information Hub",
+  "short_name": "Larder Hub",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#f5f1e7",

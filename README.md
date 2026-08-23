@@ -1,4 +1,4 @@
-# Larder weekly performance report
+# Larder Information Hub
 
 A secure, phone-first viewer for the single-sheet Larder weekly report. Everyone signs in with their email address, and the app only sends them the report sections their account is allowed to see.
 
@@ -8,6 +8,8 @@ A secure, phone-first viewer for the single-sheet Larder weekly report. Everyone
 - **Owner** — sees every section, can update the weekly report, and can manage Viewer accounts after confirming their own password.
 - **Admin** — has the same full access, and can also create and manage Owner accounts.
 
+Owners and Admins now use **Users** in the Information Hub to create accounts, manage sign-in access, and review account activity. **Weekly reports → Report viewing permissions** is solely for choosing what each Viewer can see.
+
 Owners must confirm their own account password before publishing a report or changing people’s access. The confirmation expires after five minutes. Admins do not need to reconfirm.
 
 ## One-time Netlify setup
@@ -16,7 +18,7 @@ Owners must confirm their own account password before publishing a report or cha
 2. In **Identity → Registration preferences**, turn off public registrations. Accounts are then created from the app’s Admin Control Centre.
 3. In **Project configuration → Environment variables**, add `INITIAL_ADMIN_EMAILS` with the email address you will use as the first Admin. Multiple Admin emails can be separated with commas.
 4. In **Identity → Users**, invite the first user with that same email address. Open the invitation email and choose a strong password. Because the email is listed in `INITIAL_ADMIN_EMAILS`, that account becomes the initial Admin after signing in.
-5. Deploy the `main` branch. Open the HTTPS Netlify address, sign in, then use **Report menu → Admin control centre** to add people and choose their permitted report dates, visible overview cards, sections, and individual figures. Each person’s card also has a **View …’s report** preview button.
+5. Deploy the `main` branch. Open the HTTPS Netlify address, sign in, then use **Users** to add people. Use **Weekly reports → Report viewing permissions** to choose their permitted report dates, visible overview cards, sections, and individual figures. Each person’s card also has a **View …’s report** preview button.
 
 You can remove the older `REPORT_UPDATE_KEY` environment variable after this version is deployed; it is no longer used.
 
@@ -38,3 +40,17 @@ The app stores the report centrally and automatically refreshes open reports wit
 - `netlify/functions/access.mjs` — stores section permissions and roles.
 
 The weekly Excel file and exported report data are intentionally excluded from Git. This keeps the report behind authenticated access instead of publishing it as a static file.
+
+## My tasks and phone reminders
+
+The Hub includes a secure, in-app task area. Admins and Owners can set tasks for anyone. In the Admin Control Centre, task setters can be enabled and restricted to named people. Assigned people can mark a task complete; the task setter can accept or decline it. Weekly and monthly tasks create their next occurrence after the current one is accepted.
+
+The **My tasks** button shows each person’s outstanding-task count. Task updates are visible in the Hub. Phone reminders use standards-based web push, so people must enable notifications from **My tasks** on each device. On iPhone and iPad, they must first add the Hub to the Home Screen before granting notification permission.
+
+Before deploying phone reminders, create VAPID keys with `pnpm exec web-push generate-vapid-keys` and add these Netlify environment variables:
+
+- `VAPID_PUBLIC_KEY`
+- `VAPID_PRIVATE_KEY`
+- `VAPID_SUBJECT` (for example, `mailto:tasks@your-domain.example`)
+
+The scheduled reminder function checks due reminders every 15 minutes. No task data or phone-subscription data is stored in Git.

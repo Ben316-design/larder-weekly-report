@@ -37,6 +37,21 @@ function validSections(value) {
   return [...new Set(values.map((section) => String(section || "").trim()).filter(validSectionId))].slice(0, 100);
 }
 
+function validUserIds(value) {
+  const values = Array.isArray(value) ? value : [];
+  return [...new Set(values
+    .map((userId) => String(userId || "").trim())
+    .filter((userId) => /^[A-Za-z0-9_-]{1,120}$/.test(userId)))].slice(0, 100);
+}
+
+export function normaliseTaskAccess(value) {
+  const access = value && typeof value === "object" ? value : {};
+  return {
+    canCreate: Boolean(access.canCreate),
+    assigneeIds: validUserIds(access.assigneeIds),
+  };
+}
+
 function validWeek(value) {
   const week = String(value || "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(week)) return "";
@@ -95,6 +110,7 @@ export async function saveAccess(userId, access) {
     view: normaliseAccessView(access.view),
     dateAccess: normaliseDateAccess(access.dateAccess),
     canPublish: Boolean(access.canPublish),
+    taskAccess: normaliseTaskAccess(access.taskAccess),
     updatedAt: new Date().toISOString(),
   };
   await accessStore().setJSON(accessKey, { users });
@@ -117,6 +133,7 @@ export async function getAccessProfile(user) {
     dateAccess: hasFullAccess ? { scope: "all" } : normaliseDateAccess(saved.dateAccess),
     canManageUsers: hasFullAccess,
     canPublish: hasFullAccess,
+    taskAccess: hasFullAccess ? { canCreate: true, assigneeIds: ["*"] } : normaliseTaskAccess(saved.taskAccess),
   };
 }
 
@@ -129,6 +146,7 @@ export function publicAccessProfile(access) {
     dateAccess: access.dateAccess,
     canManageUsers: access.canManageUsers,
     canPublish: access.canPublish,
+    taskAccess: access.taskAccess,
   };
 }
 

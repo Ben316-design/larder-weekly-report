@@ -48,7 +48,7 @@ async function requireManager(request, { requireRecentPassword = false } = {}) {
   if (!user) return { error: json({ error: "Please sign in." }, 401) };
   const access = await getAccessProfile(user);
   if (!access.enabled || !access.canManageUsers) return { error: json({ error: "You do not have access to the Admin Control Centre." }, 403) };
-  if (requireRecentPassword && !(await hasRecentReauthentication(user.id))) {
+  if (requireRecentPassword && access.role === "owner" && !(await hasRecentReauthentication(user.id))) {
     return { error: json({ error: "Confirm your account password before making this change." }, 428) };
   }
   return { user, access };

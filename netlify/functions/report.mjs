@@ -52,7 +52,7 @@ export default async function report(request) {
     return json({ error: "This update must come from the Larder report app." }, 403);
   }
   if (!access.canPublish) return json({ error: "You do not have permission to publish the weekly report." }, 403);
-  if (!(await hasRecentReauthentication(user.id))) return json({ error: "Confirm your account password before publishing the report." }, 428);
+  if (access.role === "owner" && !(await hasRecentReauthentication(user.id))) return json({ error: "Confirm your account password before publishing the report." }, 428);
 
   let submittedReport;
   try {

@@ -8,7 +8,7 @@ A secure, phone-first viewer for the single-sheet Larder weekly report. Everyone
 - **Owner** — sees every section, can update the weekly report, and can manage Viewer accounts after confirming their own password.
 - **Admin** — has the same full access, and can also create and manage Owner accounts.
 
-Owners and Admins must confirm their own account password before publishing a report or changing people’s access. The confirmation expires after five minutes.
+Owners must confirm their own account password before publishing a report or changing people’s access. The confirmation expires after five minutes. Admins do not need to reconfirm.
 
 ## One-time Netlify setup
 
@@ -24,7 +24,7 @@ You can remove the older `REPORT_UPDATE_KEY` environment variable after this ver
 
 1. Sign in as an Admin or Owner.
 2. Choose **Update report** from the menu.
-3. Confirm your own account password.
+3. If you are an Owner, confirm your own account password.
 4. Drop in the week’s `.xlsx`, `.xlsm`, or `.xls` report.
 
 The app stores the report centrally and automatically refreshes open reports within one minute. The workbook must contain the **Generate Report** sheet (or have the report as its first sheet).

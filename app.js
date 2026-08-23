@@ -323,6 +323,7 @@ function renderNoReport() {
 }
 
 function renderSensitiveAccessCheck() {
+  if (state.access?.role === "admin") return "";
   return `<form class="sensitive-access" data-auth-form="reauthenticate"><p><strong>Confirm it is you</strong><span>Enter your own account password before changing users or publishing a report. Confirmation lasts five minutes.</span></p><label>Your password<input required name="password" type="password" autocomplete="current-password"></label><button type="submit">Confirm</button><small class="sensitive-access__message">${escapeHtml(state.adminMessage || "")}</small></form>`;
 }
 

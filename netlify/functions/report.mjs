@@ -1,9 +1,10 @@
 import { admin, getUser, verifyRequestOrigin } from "@netlify/identity";
 import { getStore } from "@netlify/blobs";
 import { getAccessProfile, hasRecentReauthentication, publicAccessProfile } from "./access.mjs";
+import { allowedWeeksForAccess, isMasterReportModel, reportForWeek } from "../../report-model.js";
 
 const reportKey = "current-report";
-const maxPayloadBytes = 1_000_000;
+const maxPayloadBytes = 2_000_000;
 
 function reportStore() {
   return getStore({ name: "larder-weekly-report", consistency: "strong" });
@@ -22,6 +23,37 @@ function json(body, status = 200) {
 function validReport(payload) {
   const report = payload?.report;
   return Boolean(report?.selectedWeek && Array.isArray(report.sections) && report.sections.length && Array.isArray(report.overview));
+}
+
+function validSubmission(payload) {
+  return validReport(payload) || isMasterReportModel(payload?.model);
+}
+
+function reportSelection(savedReport, access, requestedWeek = "") {
+  if (!isMasterReportModel(savedReport?.model)) {
+    const report = savedReport?.report;
+    return { report, availableWeeks: report?.selectedWeek ? [report.selectedWeek] : [] };
+  }
+  const availableWeeks = allowedWeeksForAccess(savedReport.model, access.dateAccess);
+  if (!availableWeeks.length) return { report: null, availableWeeks };
+  const selectedWeek = availableWeeks.includes(requestedWeek)
+    ? requestedWeek
+    : availableWeeks.includes(savedReport.model.currentWeek)
+      ? savedReport.model.currentWeek
+      : availableWeeks.at(-1);
+  return { report: reportForWeek(savedReport.model, selectedWeek), availableWeeks };
+}
+
+function publicReportPayload(savedReport, report, access, availableWeeks, preview = null) {
+  return {
+    report: filterReport(report, access),
+    sourceName: savedReport.sourceName,
+    updatedAt: savedReport.updatedAt,
+    version: savedReport.version,
+    availableWeeks,
+    access: publicAccessProfile(access),
+    preview,
+  };
 }
 
 function filterReport(report, access) {
@@ -79,7 +111,10 @@ export default async function report(request) {
     }
     const savedReport = await reportStore().get(reportKey, { type: "json" });
     if (!savedReport) return json({ error: "No shared report has been published yet." }, 404);
-    return json({ ...savedReport, report: filterReport(savedReport.report, reportAccess), access: publicAccessProfile(reportAccess), preview });
+    const requestedWeek = new URL(request.url).searchParams.get("week") || "";
+    const selected = reportSelection(savedReport, reportAccess, requestedWeek);
+    if (!selected.report) return json({ error: "This account does not have access to a report week in the selected date range." }, 403);
+    return json(publicReportPayload(savedReport, selected.report, reportAccess, selected.availableWeeks, preview));
   }
 
   if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
@@ -97,17 +132,23 @@ export default async function report(request) {
   } catch {
     return json({ error: "The uploaded report could not be read." }, 400);
   }
-  if (!validReport(submittedReport)) return json({ error: "This file does not contain a complete weekly report." }, 400);
+  if (!validSubmission(submittedReport)) return json({ error: "This file does not contain a complete weekly report." }, 400);
 
   const serialised = JSON.stringify(submittedReport);
   if (Buffer.byteLength(serialised, "utf8") > maxPayloadBytes) return json({ error: "This report is too large to publish." }, 413);
 
+  const generatedReport = isMasterReportModel(submittedReport.model)
+    ? reportForWeek(submittedReport.model, submittedReport.model.currentWeek)
+    : submittedReport.report;
+  if (!generatedReport || !validReport({ report: generatedReport })) return json({ error: "This master workbook could not generate the selected report week." }, 400);
   const publishedReport = {
-    report: submittedReport.report,
+    report: generatedReport,
+    model: isMasterReportModel(submittedReport.model) ? submittedReport.model : null,
     sourceName: String(submittedReport.sourceName || "Weekly report").slice(0, 180),
     updatedAt: new Date().toISOString(),
     version: crypto.randomUUID(),
   };
   await reportStore().setJSON(reportKey, publishedReport);
-  return json({ ...publishedReport, report: filterReport(publishedReport.report, access), access: publicAccessProfile(access) });
+  const selected = reportSelection(publishedReport, access);
+  return json(publicReportPayload(publishedReport, selected.report, access, selected.availableWeeks));
 }

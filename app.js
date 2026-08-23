@@ -7,6 +7,7 @@ import {
   requestPasswordRecovery,
   updateUser,
 } from "https://cdn.jsdelivr.net/npm/@netlify/identity@2.0.0/+esm";
+import { allowedWeeksForAccess, reportForWeek } from "./report-model.js";
 
 const app = document.querySelector("#app");
 const sectionMenu = document.querySelector("#section-menu");
@@ -23,7 +24,7 @@ const authEndpoint = "/.netlify/functions/auth";
 const adminEndpoint = "/.netlify/functions/admin";
 const sharedReportPollInterval = 60_000;
 const localPreviewMode = location.hostname === "localhost" && new URLSearchParams(location.search).has("local-preview");
-const lowerIsBetterOverviewIds = new Set(["wages", "foh", "chefs"]);
+const lowerIsBetterOverviewIds = new Set(["wages", "foh", "chefs", "senior-management"]);
 let report = null;
 let state = {
   section: "overview",
@@ -39,11 +40,13 @@ let state = {
   adminMessage: "",
   previewUser: null,
   previewAccess: null,
+  availableWeeks: [],
 };
 let expandedTable = null;
 let sharedReportVersion = "";
 let reportPolling = null;
 let localPreviewSource = null;
+let localPreviewModel = null;
 
 const ratioSections = new Set(["overall-gp", "food-gp", "drink-gp", "wages", "foh", "chefs", "cleaners"]);
 const sectionLayouts = [
@@ -75,6 +78,7 @@ const overviewLayouts = [
   { id: "wages", label: "Wages as % of sales", value: [21, 0], trend: [23, 0] },
   { id: "foh", label: "FOH wages as % of sales", value: [21, 4], trend: [23, 4] },
   { id: "chefs", label: "Chefs wages as % of sales", value: [21, 8], trend: [23, 8] },
+  { id: "senior-management", label: "Senior Management wages as % of sales", value: [21, 12], trend: [23, 12] },
 ];
 
 const compactNumber = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 1, minimumFractionDigits: 0 });
@@ -196,7 +200,8 @@ function comparisonClass(section, header, value) {
     ? label === "ly % of sales" && /up or down/.test(group)
     : /up\/?down|same week|variance from target|^(?:7w|13w)\s*%$/.test(label);
   if (!isComparison) return "";
-  const lowerIsBetter = ["wages", "foh", "chefs", "cleaners"].includes(section.id);
+  const lowerIsBetter = ["wages", "foh", "chefs", "cleaners", "senior-management"].includes(section.id)
+    || /\b(wages?|labou?r|payroll|costs?)\b/i.test(section.label);
   if (value > 0) return lowerIsBetter ? "comparison-negative" : "comparison-positive";
   if (value < 0) return lowerIsBetter ? "comparison-positive" : "comparison-negative";
   return "";
@@ -236,9 +241,17 @@ function arrowForTrend(trend) {
   return normaliseTrend(trend).toLowerCase().startsWith("up") ? "&uarr;" : "&darr;";
 }
 
-function trendTone(trend, cardId = "") {
+function lowerIsBetterOverviewCard(card) {
+  const id = typeof card === "string" ? card : card?.id;
+  const label = typeof card === "object" ? card?.label : "";
+  return Boolean(card?.lowerIsBetter)
+    || lowerIsBetterOverviewIds.has(id)
+    || /\b(wages?|labou?r|payroll|costs?)\b/i.test(label);
+}
+
+function trendTone(trend, card = "") {
   const text = normaliseTrend(trend).toLowerCase();
-  const lowerIsBetter = lowerIsBetterOverviewIds.has(cardId);
+  const lowerIsBetter = lowerIsBetterOverviewCard(card);
   if (text.startsWith("up")) return lowerIsBetter ? "negative" : "positive";
   if (text.startsWith("down")) return lowerIsBetter ? "positive" : "negative";
   return "neutral";
@@ -248,7 +261,7 @@ function withOverviewTones(sourceReport) {
   if (!sourceReport?.overview) return sourceReport;
   return {
     ...sourceReport,
-    overview: sourceReport.overview.map((card) => ({ ...card, tone: trendTone(card.trend, card.id) })),
+    overview: sourceReport.overview.map((card) => ({ ...card, tone: trendTone(card.trend, card) })),
   };
 }
 
@@ -352,6 +365,17 @@ function permissionSections() {
   return report?.sections || sectionLayouts.map((section) => ({ ...section, headers: [{ label: "Week", group: "Week" }] }));
 }
 
+function dateAccessForEditor(savedAccess) {
+  if (savedAccess?.scope === "all") return { scope: "all" };
+  if (savedAccess?.scope === "range" && savedAccess.start && savedAccess.end) return { scope: "range", start: savedAccess.start, end: savedAccess.end };
+  return { scope: "current" };
+}
+
+function reportDateBounds() {
+  const weeks = state.availableWeeks || [];
+  return { earliest: weeks[0] || "", latest: weeks.at(-1) || report?.selectedWeek || "" };
+}
+
 function permissionFieldId(header, index) {
   return header?.id || String(index);
 }
@@ -400,11 +424,14 @@ function fieldGroups(section) {
   return [...groups.entries()];
 }
 
-function renderAccessEditor(savedView, legacySections, disabled = false) {
+function renderAccessEditor(savedView, legacySections, disabled = false, savedDateAccess = null) {
   const view = accessViewForEditor(savedView, legacySections);
   const overviewCards = report?.overview || overviewLayouts;
+  const dateAccess = dateAccessForEditor(savedDateAccess);
+  const dateBounds = reportDateBounds();
   return `<section class="permission-editor">
-    <div class="permission-editor__intro"><strong>What this person can view</strong><span>Choose the overview cards and individual figures that appear in their report.</span></div>
+    <div class="permission-editor__intro"><strong>What this person can view</strong><span>Choose the report-ending dates, overview cards, and individual figures that appear in their report.</span></div>
+    <details class="permission-area" open><summary>Report dates</summary><label class="permission-toggle"><span>Date access</span><select ${disabled ? "disabled" : ""} name="dateScope"><option value="current" ${dateAccess.scope === "current" ? "selected" : ""}>Current report week only</option><option value="all" ${dateAccess.scope === "all" ? "selected" : ""}>All available weeks</option><option value="range" ${dateAccess.scope === "range" ? "selected" : ""}>Custom date range</option></select></label><div class="permission-date-range" ${dateAccess.scope === "range" ? "" : "hidden"}><label>From<input ${disabled ? "disabled" : ""} type="date" name="dateStart" min="${escapeHtml(dateBounds.earliest)}" max="${escapeHtml(dateBounds.latest)}" value="${escapeHtml(dateAccess.start || dateBounds.earliest)}"></label><label>To<input ${disabled ? "disabled" : ""} type="date" name="dateEnd" min="${escapeHtml(dateBounds.earliest)}" max="${escapeHtml(dateBounds.latest)}" value="${escapeHtml(dateAccess.end || dateBounds.latest)}"></label></div><p class="permission-date-note">This controls the report-ending week they can choose. Every permitted report still includes its 13-week comparison.</p></details>
     <details class="permission-area" open><summary>Overview page</summary><label class="permission-toggle"><input ${disabled ? "disabled" : ""} type="checkbox" name="overviewEnabled" ${view.overview.enabled ? "checked" : ""}><span>Show the overview page</span></label><div class="permission-options">${overviewCards.map((card) => `<label><input ${disabled ? "disabled" : ""} type="checkbox" name="overviewCards" value="${escapeHtml(card.id)}" ${view.overview.cards.includes(card.id) ? "checked" : ""}><span>${escapeHtml(card.label)}</span></label>`).join("")}</div></details>
     <details class="permission-area" open><summary>Detailed report sections</summary>${permissionSections().map((section) => {
       const sectionView = view.sections[section.id] || { enabled: false, fields: [] };
@@ -424,7 +451,7 @@ function renderAdmin() {
   const isAdmin = state.access?.role === "admin";
   return `<section class="admin-page">
     <button class="back-link" type="button" data-section="overview">&larr; Overview</button>
-    <div class="page-intro"><p class="eyebrow">ADMIN CONTROL CENTRE</p><h2>People and report access</h2><p>Set individual overview cards and detailed report figures for each Viewer. Owners always receive the complete report.</p></div>
+    <div class="page-intro"><p class="eyebrow">ADMIN CONTROL CENTRE</p><h2>People and report access</h2><p>Set each Viewer’s permitted report dates, overview cards, and detailed figures. Owners always receive the complete report.</p></div>
     ${renderSensitiveAccessCheck()}
     <section class="admin-create"><h3>Add a person</h3><form data-admin-form="create"><label>Name<input name="name" autocomplete="name" placeholder="Optional"></label><label>Email address<input required name="email" type="email" autocomplete="email" placeholder="person@example.com"></label><label>Temporary password<input required minlength="12" name="password" type="password" autocomplete="new-password" placeholder="At least 12 characters"></label><label>Role<select name="role"><option value="viewer">Viewer</option>${isAdmin ? '<option value="owner">Owner</option>' : ""}</select></label>${renderAccessEditor(null, permissionSections().map((section) => section.id))}<button class="auth-submit" type="submit">Create account</button></form></section>
     <section class="admin-people"><div class="section-label"><span></span>People with access</div>${users === null ? '<p class="admin-loading">Loading people…</p>' : users.map((person) => renderAdminUser(person, isAdmin)).join("")}</section>
@@ -435,7 +462,7 @@ function renderAdminUser(person, isAdmin) {
   const canEdit = !person.isInitialAdmin && (isAdmin || person.role === "viewer");
   if (!canEdit) return `<article class="admin-user-card"><div><strong>${escapeHtml(person.name || person.email)}</strong><span>${escapeHtml(person.email)}</span></div><p>${person.isInitialAdmin ? "Primary administrator" : "Owner account"} · Full report access</p>${renderPreviewButton(person)}</article>`;
   const owner = person.role === "owner";
-  return `<form class="admin-user-card" data-admin-form="update"><input type="hidden" name="userId" value="${escapeHtml(person.id)}"><div class="admin-user-card__identity"><label>Name<input name="name" value="${escapeHtml(person.name || "")}" autocomplete="name"></label><span>${escapeHtml(person.email)}</span></div><div class="admin-user-card__controls"><label>Role<select name="role"><option value="viewer" ${!owner ? "selected" : ""}>Viewer</option>${isAdmin ? `<option value="owner" ${owner ? "selected" : ""}>Owner</option>` : ""}</select></label><label class="admin-toggle"><input name="enabled" type="checkbox" ${person.enabled ? "checked" : ""}><span>Can sign in</span></label></div>${owner ? '<p class="permission-owner">Owners always see the complete report.</p>' : renderAccessEditor(person.view, person.sections)}<div class="admin-user-card__actions">${renderPreviewButton(person)}<button type="submit">Save access</button></div></form>`;
+  return `<form class="admin-user-card" data-admin-form="update"><input type="hidden" name="userId" value="${escapeHtml(person.id)}"><div class="admin-user-card__identity"><label>Name<input name="name" value="${escapeHtml(person.name || "")}" autocomplete="name"></label><span>${escapeHtml(person.email)}</span></div><div class="admin-user-card__controls"><label>Role<select name="role"><option value="viewer" ${!owner ? "selected" : ""}>Viewer</option>${isAdmin ? `<option value="owner" ${owner ? "selected" : ""}>Owner</option>` : ""}</select></label><label class="admin-toggle"><input name="enabled" type="checkbox" ${person.enabled ? "checked" : ""}><span>Can sign in</span></label></div>${owner ? '<p class="permission-owner">Owners always see the complete report.</p>' : renderAccessEditor(person.view, person.sections, false, person.dateAccess)}<div class="admin-user-card__actions">${renderPreviewButton(person)}<button type="submit">Save access</button></div></form>`;
 }
 
 function renderMenu() {
@@ -460,15 +487,61 @@ function renderUploader() {
   return `<section class="upload-panel" aria-label="Update weekly report">
     <div class="upload-panel__copy">
       <p class="eyebrow">WEEKLY UPDATE</p>
-      <h3>Update this week's report</h3>
-      <p>Drop an Excel report here to update the figures for everyone.</p>
+      <h3>Update the master report</h3>
+      <p>Drop in the full Master Performance Sheet to update the figures and available report weeks for everyone.</p>
     </div>
     <button class="drop-zone" id="report-uploader" type="button" data-action="choose-upload">
       <span class="drop-zone__icon">⇪</span>
-      <span><strong>Drop .xlsx file here</strong><small>or tap to choose your weekly report</small></span>
+      <span><strong>Drop the master .xlsx here</strong><small>or tap to choose the full Master Performance Sheet</small></span>
     </button>
     <div class="upload-status" id="upload-status" aria-live="polite"><span>Current source</span><strong>${escapeHtml(state.sourceName)}</strong></div>
   </section>`;
+}
+
+function monthKey(value) {
+  return /^\d{4}-\d{2}/.test(plainText(value)) ? plainText(value).slice(0, 7) : "";
+}
+
+function shiftMonth(month, amount) {
+  const [year, index] = month.split("-").map(Number);
+  const date = new Date(Date.UTC(year, index - 1 + amount, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthTitle(month) {
+  const [year, number] = month.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(year, number - 1, 1)));
+}
+
+function renderWeekCalendar(weeks) {
+  const selectedWeek = report?.selectedWeek || weeks.at(-1) || "";
+  const month = monthKey(state.calendarMonth) || monthKey(selectedWeek);
+  const [year, number] = month.split("-").map(Number);
+  const firstDay = (new Date(Date.UTC(year, number - 1, 1)).getUTCDay() + 6) % 7;
+  const daysInMonth = new Date(Date.UTC(year, number, 0)).getUTCDate();
+  const available = new Set(weeks);
+  const earliestMonth = monthKey(weeks[0]);
+  const latestMonth = monthKey(weeks.at(-1));
+  const cells = Array.from({ length: firstDay }, () => `<span class="week-calendar__blank" aria-hidden="true"></span>`);
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const week = `${month}-${String(day).padStart(2, "0")}`;
+    const allowed = available.has(week);
+    const selected = week === selectedWeek;
+    cells.push(`<button class="week-calendar__day ${allowed ? "is-available" : ""} ${selected ? "is-selected" : ""}" type="button" ${allowed ? `data-action="choose-calendar-week" data-week="${week}"` : "disabled"} aria-label="${escapeHtml(formatDate(week))}${selected ? ", selected" : ""}">${day}</button>`);
+  }
+  return `<div class="week-calendar" role="dialog" aria-label="Choose report ending week">
+    <div class="week-calendar__header"><button type="button" data-action="calendar-month" data-month-offset="-1" ${month <= earliestMonth ? "disabled" : ""} aria-label="Previous month">‹</button><strong>${escapeHtml(monthTitle(month))}</strong><button type="button" data-action="calendar-month" data-month-offset="1" ${month >= latestMonth ? "disabled" : ""} aria-label="Next month">›</button></div>
+    <div class="week-calendar__weekdays"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
+    <div class="week-calendar__days">${cells.join("")}</div>
+    <p>Gold dates are available report-ending weeks.</p>
+    <button class="week-calendar__cancel" type="button" data-action="close-calendar">Cancel</button>
+  </div>`;
+}
+
+function renderWeekPicker() {
+  const weeks = [...new Set(state.availableWeeks || [])];
+  if (weeks.length <= 1) return `<strong>${formatDate(report.selectedWeek)}</strong>`;
+  return `<div class="report-week-picker"><span>Report ending</span><button class="report-week-picker__button" type="button" data-action="toggle-calendar" aria-expanded="${state.calendarOpen ? "true" : "false"}" aria-haspopup="dialog"><strong>${formatDate(report.selectedWeek)}</strong><b aria-hidden="true">▦</b></button>${state.calendarOpen ? renderWeekCalendar(weeks) : ""}</div>`;
 }
 
 function renderOverview() {
@@ -492,11 +565,11 @@ function renderOverview() {
     <section class="page-intro overview-intro">
       <p class="eyebrow">WEEKLY PERFORMANCE REPORT</p>
       <h2>At a glance</h2>
-      <p>The current week, with the last 13 weeks kept in every report section.</p>
+      <p>Select a permitted report-ending week. The full 13-week comparison stays in every report section.</p>
     </section>
 
-    <section class="week-hero" aria-label="Current report week">
-      <div><span>Reporting week</span><strong>${formatDate(report.selectedWeek)}</strong></div>
+    <section class="week-hero" aria-label="Selected report week">
+      <div>${renderWeekPicker()}</div>
       <button class="text-button" type="button" data-action="open-menu">Browse sections <span>&rarr;</span></button>
     </section>
 
@@ -512,7 +585,7 @@ function renderUpdateReport() {
       <div class="page-intro update-report-intro">
         <p class="eyebrow">WEEKLY REPORT</p>
         <h2>Update report</h2>
-        <p>Drag in this week’s Excel report to update the app for everyone.</p>
+        <p>Drag in the full Master Performance Sheet to update the app and all available report weeks for everyone.</p>
       </div>
       ${renderSensitiveAccessCheck()}
       ${renderUploader()}
@@ -520,11 +593,12 @@ function renderUpdateReport() {
 }
 
 function renderSummaryCard(card) {
-  const linkedSection = card.id === "sales-inc" || card.id === "sales-ex" ? "sales" : card.id;
-  return `<button class="summary-card summary-card--${card.tone}" data-section="${linkedSection}" type="button">
+  const linkedSection = card.sectionId || (card.id === "sales-inc" || card.id === "sales-ex" ? "sales" : card.id);
+  const tone = card.tone || trendTone(card.trend, card);
+  return `<button class="summary-card summary-card--${tone}" data-section="${linkedSection}" type="button">
     <span class="summary-card__label">${escapeHtml(card.label)}</span>
     <strong>${formatOverviewValue(card)}</strong>
-    <span class="trend trend--${card.tone}">${arrowForTrend(card.trend)} ${escapeHtml(normaliseTrend(card.trend) || "No comparison")}</span>
+    <span class="trend trend--${tone}">${arrowForTrend(card.trend)} ${escapeHtml(normaliseTrend(card.trend) || "No comparison")}</span>
     <small>${escapeHtml(card.detail || "Current uploaded report")}</small>
   </button>`;
 }
@@ -673,12 +747,12 @@ async function beginSignedInExperience() {
     if (!loaded) {
       state = { ...state, authMode: "authenticated", section: canPublishReport() ? "update-report" : "overview", authMessage: "" };
       render();
-      if (!reportPolling) reportPolling = window.setInterval(() => { if (!state.previewUser) void loadSharedReport({ renderAfterLoad: true }); }, sharedReportPollInterval);
+      if (!reportPolling) reportPolling = window.setInterval(() => { if (!state.previewUser) void loadSharedReport({ renderAfterLoad: true, week: report?.selectedWeek || "" }); }, sharedReportPollInterval);
       return;
     }
     state = { ...state, authMode: "authenticated", authMessage: "" };
     render();
-    if (!reportPolling) reportPolling = window.setInterval(() => { if (!state.previewUser) void loadSharedReport({ renderAfterLoad: true }); }, sharedReportPollInterval);
+    if (!reportPolling) reportPolling = window.setInterval(() => { if (!state.previewUser) void loadSharedReport({ renderAfterLoad: true, week: report?.selectedWeek || "" }); }, sharedReportPollInterval);
   } catch (error) {
     console.error(error);
     authFailure(error.message || "We could not open your account. Please try again.");
@@ -787,17 +861,49 @@ function accessViewFromForm(form) {
   };
 }
 
+function dateAccessFromForm(form) {
+  const formData = new FormData(form);
+  const scope = plainText(formData.get("dateScope"));
+  if (scope === "all") return { scope: "all" };
+  if (scope === "range") return { scope, start: plainText(formData.get("dateStart")), end: plainText(formData.get("dateEnd")) };
+  return { scope: "current" };
+}
+
+function localSectionsFromView(view) {
+  return Object.entries(view?.sections || {}).filter(([, selection]) => selection?.enabled).map(([section]) => section);
+}
+
+function localUserWithAccess(current, body) {
+  const role = body.role === "owner" ? "owner" : "viewer";
+  return {
+    ...current,
+    id: current?.id || `local-${Date.now()}`,
+    name: plainText(body.name),
+    email: plainText(body.email) || current?.email || "",
+    role,
+    enabled: body.enabled !== false,
+    sections: localSectionsFromView(body.view),
+    view: role === "owner" ? null : body.view,
+    dateAccess: role === "owner" ? { scope: "all" } : body.dateAccess,
+    isInitialAdmin: false,
+  };
+}
+
 async function submitAdminForm(form) {
-  if (localPreviewMode) {
-    state = { ...state, adminMessage: "This is a local visual preview. Changes are not saved here." };
-    render();
-    return;
-  }
   const formData = new FormData(form);
   const action = form.dataset.adminForm;
   const body = action === "create"
-    ? { action, name: formData.get("name"), email: formData.get("email"), password: formData.get("password"), role: formData.get("role"), view: accessViewFromForm(form) }
-    : { action, userId: formData.get("userId"), name: formData.get("name"), role: formData.get("role"), enabled: formData.get("enabled") === "on", view: accessViewFromForm(form) };
+    ? { action, name: formData.get("name"), email: formData.get("email"), password: formData.get("password"), role: formData.get("role"), view: accessViewFromForm(form), dateAccess: dateAccessFromForm(form) }
+    : { action, userId: formData.get("userId"), name: formData.get("name"), role: formData.get("role"), enabled: formData.get("enabled") === "on", view: accessViewFromForm(form), dateAccess: dateAccessFromForm(form) };
+  if (localPreviewMode) {
+    const users = state.adminUsers || [];
+    const nextUsers = action === "create"
+      ? [...users, localUserWithAccess(null, body)]
+      : users.map((person) => String(person.id) === String(body.userId) ? localUserWithAccess(person, body) : person);
+    state = { ...state, adminUsers: nextUsers, adminMessage: action === "create" ? "Local account created for preview only." : "Local access saved. Use View report to check this person’s permissions." };
+    render();
+    return;
+  }
   state = { ...state, adminMessage: action === "create" ? "Creating account…" : "Saving access…" };
   render();
   try {
@@ -823,8 +929,9 @@ async function signOut() {
     reportPolling = null;
   }
   report = null;
+  localPreviewModel = null;
   sharedReportVersion = "";
-  state = { section: "overview", week: "", sourceName: "", isUploaded: false, authMode: "login", authMessage: "You have signed out.", authToken: "", user: null, access: null, adminUsers: null, adminMessage: "" };
+  state = { section: "overview", week: "", sourceName: "", isUploaded: false, authMode: "login", authMessage: "You have signed out.", authToken: "", user: null, access: null, adminUsers: null, adminMessage: "", availableWeeks: [] };
   render();
 }
 
@@ -872,6 +979,24 @@ function attachDynamicListeners() {
   document.querySelectorAll("[data-action='sign-out']").forEach((button) => button.addEventListener("click", () => { void signOut(); }));
   document.querySelectorAll("[data-action='preview-user']").forEach((button) => button.addEventListener("click", () => { void previewUserReport(button.dataset.userId); }));
   document.querySelectorAll("[data-action='exit-preview']").forEach((button) => button.addEventListener("click", () => { void exitPreview(); }));
+  document.querySelectorAll("[data-action='toggle-calendar']").forEach((button) => button.addEventListener("click", () => {
+    const opening = !state.calendarOpen;
+    state = { ...state, calendarOpen: opening, calendarMonth: monthKey(report?.selectedWeek) };
+    render();
+  }));
+  document.querySelectorAll("[data-action='close-calendar']").forEach((button) => button.addEventListener("click", () => {
+    state = { ...state, calendarOpen: false, calendarMonth: monthKey(report?.selectedWeek) };
+    render();
+  }));
+  document.querySelectorAll("[data-action='calendar-month']").forEach((button) => button.addEventListener("click", () => {
+    state = { ...state, calendarOpen: true, calendarMonth: shiftMonth(state.calendarMonth || monthKey(report?.selectedWeek), Number(button.dataset.monthOffset || 0)) };
+    render();
+  }));
+  document.querySelectorAll("[data-action='choose-calendar-week']").forEach((button) => button.addEventListener("click", () => { void changeReportWeek(button.dataset.week); }));
+  document.querySelectorAll("select[name='dateScope']").forEach((select) => select.addEventListener("change", () => {
+    const range = select.closest(".permission-area")?.querySelector(".permission-date-range");
+    if (range) range.hidden = select.value !== "range";
+  }));
   document.querySelectorAll("[data-action='choose-upload']").forEach((button) => {
     button.addEventListener("click", () => uploadInput.click());
     button.addEventListener("dragover", (event) => { event.preventDefault(); button.classList.add("is-dragging"); });
@@ -939,13 +1064,28 @@ function filterReportForView(source, access) {
   return { ...source, overview, sections };
 }
 
+async function changeReportWeek(week) {
+  if (!week || week === report?.selectedWeek || !(state.availableWeeks || []).includes(week)) return;
+  if (localPreviewMode && localPreviewModel) {
+    const fullReport = reportForWeek(localPreviewModel, week);
+    if (!fullReport) return;
+    report = withOverviewTones(state.previewAccess ? filterReportForView(fullReport, state.previewAccess) : fullReport);
+    state = { ...state, week: report.selectedWeek, calendarOpen: false, calendarMonth: monthKey(report.selectedWeek) };
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  const loaded = await loadSharedReport({ week, renderAfterLoad: true, previewUserId: state.previewUser?.id || "" });
+  if (loaded) window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
 function applySharedReport(payload, { renderAfterLoad = false, preview = false } = {}) {
   if (!isSharedReportPayload(payload)) return false;
   const version = plainText(payload.version || payload.updatedAt);
   const previewing = preview || Boolean(payload.preview);
   const reportAccess = payload.access || state.access;
   const nextAccess = previewing ? state.access : reportAccess;
-  const versionKey = `${version}|${payload.preview?.id || ""}|${JSON.stringify(reportAccess || {})}`;
+  const versionKey = `${version}|${payload.preview?.id || ""}|${payload.report?.selectedWeek || ""}|${JSON.stringify(reportAccess || {})}`;
   const hasChanged = !sharedReportVersion || versionKey !== sharedReportVersion;
   if (!hasChanged) return true;
   report = withOverviewTones(payload.report);
@@ -961,6 +1101,9 @@ function applySharedReport(payload, { renderAfterLoad = false, preview = false }
     sourceName: plainText(payload.sourceName) || "Published report",
     isUploaded: false,
     access: nextAccess,
+    availableWeeks: Array.isArray(payload.availableWeeks) && payload.availableWeeks.length ? payload.availableWeeks : [report.selectedWeek],
+    calendarOpen: false,
+    calendarMonth: monthKey(report.selectedWeek),
     previewUser: previewing ? payload.preview : null,
     previewAccess: previewing ? reportAccess : null,
   };
@@ -969,10 +1112,13 @@ function applySharedReport(payload, { renderAfterLoad = false, preview = false }
   return true;
 }
 
-async function loadSharedReport({ renderAfterLoad = false, previewUserId = "" } = {}) {
+async function loadSharedReport({ renderAfterLoad = false, previewUserId = "", week = "" } = {}) {
   if (location.protocol !== "https:") return false;
   try {
-    const url = previewUserId ? `${sharedReportEndpoint}?preview=${encodeURIComponent(previewUserId)}` : sharedReportEndpoint;
+    const parameters = new URLSearchParams();
+    if (previewUserId) parameters.set("preview", previewUserId);
+    if (week) parameters.set("week", week);
+    const url = parameters.size ? `${sharedReportEndpoint}?${parameters.toString()}` : sharedReportEndpoint;
     const response = await fetch(url, { cache: "no-store", headers: { Accept: "application/json" } });
     if (response.status === 401) {
       if (isSignedIn()) await signOut();
@@ -992,9 +1138,11 @@ async function previewUserReport(userId) {
   if (localPreviewMode) {
     const person = state.adminUsers?.find((user) => user.id === userId);
     if (!person || !localPreviewSource) return;
-    const previewAccess = person.role === "owner" ? { role: "owner", sections: permissionSections().map((section) => section.id) } : { role: "viewer", sections: person.sections, view: person.view };
-    report = filterReportForView(localPreviewSource, previewAccess);
-    state = { ...state, section: "overview", previewUser: { id: person.id, name: person.name || person.email, email: person.email }, previewAccess };
+    const previewAccess = person.role === "owner" ? { role: "owner", sections: permissionSections().map((section) => section.id), dateAccess: { scope: "all" } } : { role: "viewer", sections: person.sections, view: person.view, dateAccess: person.dateAccess };
+    const availableWeeks = localPreviewModel ? allowedWeeksForAccess(localPreviewModel, previewAccess.dateAccess) : [localPreviewSource.selectedWeek];
+    const sourceReport = localPreviewModel ? reportForWeek(localPreviewModel, availableWeeks.includes(localPreviewModel.currentWeek) ? localPreviewModel.currentWeek : availableWeeks.at(-1)) : localPreviewSource;
+    report = withOverviewTones(filterReportForView(sourceReport, previewAccess));
+    state = { ...state, section: "overview", availableWeeks, calendarOpen: false, calendarMonth: monthKey(report.selectedWeek), previewUser: { id: person.id, name: person.name || person.email, email: person.email }, previewAccess };
     render();
     window.scrollTo({ top: 0, behavior: "smooth" });
     return;
@@ -1013,8 +1161,8 @@ async function previewUserReport(userId) {
 async function exitPreview() {
   if (!state.previewUser) return;
   if (localPreviewMode && localPreviewSource) {
-    report = localPreviewSource;
-    state = { ...state, previewUser: null, previewAccess: null, section: "admin", adminMessage: "" };
+    report = localPreviewModel ? withOverviewTones(reportForWeek(localPreviewModel, localPreviewModel.currentWeek)) : localPreviewSource;
+    state = { ...state, availableWeeks: localPreviewModel?.availableWeeks || [report.selectedWeek], calendarOpen: false, calendarMonth: monthKey(report.selectedWeek), previewUser: null, previewAccess: null, section: "admin", adminMessage: "" };
     render();
     return;
   }
@@ -1024,13 +1172,13 @@ async function exitPreview() {
   await loadSharedReport({ renderAfterLoad: true });
 }
 
-async function publishSharedReport(nextReport, sourceName) {
+async function publishSharedReport(submission, sourceName) {
   const response = await fetch(sharedReportEndpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ report: nextReport, sourceName }),
+    body: JSON.stringify({ ...submission, sourceName }),
   });
   const payload = await response.json().catch(() => ({}));
   if (response.status === 428) throw new Error("Confirm your own password above before publishing this report.");
@@ -1051,20 +1199,36 @@ async function handleUpload(files) {
     setUploadStatus("The Excel reader is unavailable. Check your internet connection and reload the app.", "is-error");
     return;
   }
-  setUploadStatus("Reading your weekly report…", "is-loading");
+  setUploadStatus("Reading your master report…", "is-loading");
   try {
     const workbook = window.XLSX.read(await file.arrayBuffer(), { type: "array", cellNF: true, cellText: true, cellStyles: true });
     const sheetName = workbook.SheetNames.find((name) => /generate\s*report/i.test(name)) || workbook.SheetNames[0];
     if (!sheetName) throw new Error("The workbook does not contain a report sheet.");
-    const nextReport = reportFromSheet(workbook.Sheets[sheetName]);
+    const reportSheet = workbook.Sheets[sheetName];
+    const masterSections = masterSectionLayouts(reportSheet);
+    const isMasterWorkbook = masterSections.length > 0 && masterSections.every((section) => (
+      (section.sourceColumns || [{ source: section.source }]).every(({ source }) => workbook.Sheets[source])
+    ));
+    const model = isMasterWorkbook ? masterReportModelFromWorkbook(workbook, reportSheet) : null;
+    const nextReport = model ? reportForWeek(model, model.currentWeek) : reportFromSheet(reportSheet);
+    const submission = model ? { model } : { report: nextReport };
+    if (localPreviewMode) {
+      localPreviewModel = model;
+      localPreviewSource = withOverviewTones(nextReport);
+      report = localPreviewSource;
+      state = { ...state, section: "overview", week: report.selectedWeek, sourceName: file.name, availableWeeks: model?.availableWeeks || [report.selectedWeek], calendarOpen: false, calendarMonth: monthKey(report.selectedWeek), adminMessage: "Master workbook loaded for local preview only." };
+      render();
+      setUploadStatus("Master workbook loaded locally. It has not been published.", "is-success");
+      return;
+    }
     if (!canUseSharedUpdates()) throw new Error("Only an Administrator or Owner can update the shared report.");
-    setUploadStatus("Publishing this week for everyone…", "is-loading");
-    const sharedReport = await publishSharedReport(nextReport, file.name);
+    setUploadStatus("Publishing the master report for everyone…", "is-loading");
+    const sharedReport = await publishSharedReport(submission, file.name);
     applySharedReport(sharedReport, { renderAfterLoad: true });
     setUploadStatus("Updated for everyone. Open reports refresh automatically within one minute.", "is-success");
   } catch (error) {
     console.error(error);
-    setUploadStatus(error.message || "The report could not be read. Please use the single-sheet weekly report export.", "is-error");
+    setUploadStatus(error.message || "The master workbook could not be read.", "is-error");
   } finally {
     uploadInput.value = "";
   }
@@ -1116,7 +1280,7 @@ function reportFromSheet(sheet) {
   return {
     reportTitle: plainText(cellValue(sheet, 0, 0)) || "LARDER LICHFIELD | WEEKLY PERFORMANCE REPORT",
     selectedWeek: week,
-    overview: overviewLayouts.map((layout) => {
+    overview: overviewCardLayouts(sheet, layouts).map((layout) => {
       const trend = plainText(cellValue(sheet, layout.trend[0], layout.trend[1]));
       return {
         id: layout.id,
@@ -1124,11 +1288,280 @@ function reportFromSheet(sheet) {
         value: cellValue(sheet, layout.value[0], layout.value[1]),
         numberFormat: cellNumberFormat(sheet, layout.value[0], layout.value[1]),
         trend,
-        tone: trendTone(trend, layout.id),
+        lowerIsBetter: layout.lowerIsBetter,
+        sectionId: layout.sectionId,
+        tone: trendTone(trend, layout),
         detail: "Current report",
       };
     }),
     sections,
+  };
+}
+
+function headersFromSheet(sheet, layout) {
+  let activeGroup = "";
+  const usedHeaderIds = new Set();
+  return Array.from({ length: layout.columns }, (_, index) => {
+    const groupCell = plainText(cellValue(sheet, layout.groupRow, index));
+    if (groupCell) activeGroup = groupCell;
+    const label = plainText(cellValue(sheet, layout.headerRow, index));
+    const displayLabel = label || activeGroup || `Column ${index + 1}`;
+    return {
+      id: index === 0 ? "week" : uniqueIdentifier(`${activeGroup}-${displayLabel}`, usedHeaderIds),
+      label: displayLabel,
+      group: activeGroup,
+    };
+  });
+}
+
+function formulaAt(sheet, row, column) {
+  const address = window.XLSX.utils.encode_cell({ r: row, c: column });
+  const formula = plainText(sheet[address]?.f);
+  return formula ? (formula.startsWith("=") ? formula : `=${formula}`) : "";
+}
+
+function preferredOverviewCardId(label) {
+  const name = slugify(label, "overview-card");
+  if (/total.*sales.*inc/.test(name)) return "sales-inc";
+  if (/total.*sales.*ex/.test(name)) return "sales-ex";
+  if (/overall.*gp/.test(name)) return "overall-gp";
+  if (/food.*gp/.test(name)) return "food-gp";
+  if (/drink.*gp/.test(name)) return "drink-gp";
+  if (/total.*covers/.test(name)) return "covers";
+  if (/spend.*head/.test(name)) return "sph";
+  if (/future.*booking/.test(name)) return "bookings";
+  if (/senior.*management.*wage/.test(name)) return "senior-management";
+  if (/(front.*house|foh).*wage/.test(name)) return "foh";
+  if (/chef.*wage/.test(name)) return "chefs";
+  if (/^wages?.*(sales|of)/.test(name)) return "wages";
+  return name;
+}
+
+function overviewSectionId(cardId, sections) {
+  const preferred = cardId === "sales-inc" || cardId === "sales-ex" ? "sales" : cardId;
+  if (sections.some((section) => section.id === preferred)) return preferred;
+  const terms = {
+    "senior-management": /senior.*management/i,
+    foh: /front.*house|foh/i,
+    chefs: /chef/i,
+    wages: /total.*wage|wages/i,
+    "overall-gp": /overall.*(?:gp|profit)/i,
+    "food-gp": /food.*(?:gp|profit)/i,
+    "drink-gp": /drink.*(?:gp|profit)/i,
+    covers: /cover/i,
+    sph: /spend.*head/i,
+    bookings: /future.*booking/i,
+  };
+  const matcher = terms[cardId];
+  return matcher ? sections.find((section) => matcher.test(section.label))?.id || "" : "";
+}
+
+function overviewCardLayouts(sheet, sections = []) {
+  const merges = sheet["!merges"] || [];
+  const usedIds = new Set();
+  const cards = [];
+  for (const titleRange of merges) {
+    const titleWidth = titleRange.e.c - titleRange.s.c + 1;
+    if (titleWidth < 3 || titleRange.e.r !== titleRange.s.r) continue;
+    const label = plainText(cellValue(sheet, titleRange.s.r, titleRange.s.c));
+    if (!label || /^(?:7|13)w\s+average|sales mix|adjusted|target\b|flash\b/i.test(label)) continue;
+    const valueRange = merges.find((range) => range.s.c === titleRange.s.c && range.e.c === titleRange.e.c && range.s.r === titleRange.e.r + 1);
+    if (!valueRange) continue;
+    const value = cellValue(sheet, valueRange.s.r, valueRange.s.c);
+    const valueFormula = formulaAt(sheet, valueRange.s.r, valueRange.s.c);
+    if (value == null && !valueFormula) continue;
+    const trendRange = merges.find((range) => range.s.c === titleRange.s.c && range.e.c === titleRange.e.c && range.s.r === valueRange.e.r + 1);
+    const baseId = preferredOverviewCardId(label);
+    const fallback = overviewLayouts.find((layout) => layout.id === baseId);
+    const id = uniqueIdentifier(baseId, usedIds);
+    const trend = trendRange ? [trendRange.s.r, trendRange.s.c] : (fallback?.trend || [valueRange.e.r + 1, valueRange.s.c]);
+    cards.push({
+      id,
+      label,
+      order: titleRange.s.r * 1000 + titleRange.s.c,
+      value: [valueRange.s.r, valueRange.s.c],
+      trend,
+      valueFormula,
+      trendFormula: formulaAt(sheet, trend[0], trend[1]),
+      staticValue: value,
+      staticTrend: plainText(cellValue(sheet, trend[0], trend[1])),
+      numberFormat: cellNumberFormat(sheet, valueRange.s.r, valueRange.s.c),
+      lowerIsBetter: /\b(wages?|labou?r|payroll|costs?)\b/i.test(label),
+      sectionId: overviewSectionId(baseId, sections),
+    });
+  }
+  if (cards.length) return cards.sort((left, right) => left.order - right.order).map(({ order, ...card }) => card);
+  return overviewLayouts.map((layout) => ({
+    ...layout,
+    valueFormula: formulaAt(sheet, layout.value[0], layout.value[1]),
+    trendFormula: formulaAt(sheet, layout.trend[0], layout.trend[1]),
+    staticValue: cellValue(sheet, layout.value[0], layout.value[1]),
+    staticTrend: plainText(cellValue(sheet, layout.trend[0], layout.trend[1])),
+    numberFormat: cellNumberFormat(sheet, layout.value[0], layout.value[1]),
+    lowerIsBetter: /\b(wages?|labou?r|payroll|costs?)\b/i.test(layout.label),
+    sectionId: overviewSectionId(layout.id, sections),
+  }));
+}
+
+function cellLocationFromReference(reference) {
+  const match = plainText(reference).toUpperCase().match(/^\$?([A-Z]{1,3})\$?(\d+)$/);
+  if (!match) return null;
+  const column = [...match[1]].reduce((total, letter) => total * 26 + letter.charCodeAt(0) - 64, 0) - 1;
+  return { column, row: Number(match[2]) - 1 };
+}
+
+function formulaReferences(formula) {
+  return plainText(formula).toUpperCase().match(/\$?[A-Z]{1,3}\$?\d+/g) || [];
+}
+
+function formulaTerm(sheet, reference, dataRow) {
+  const location = cellLocationFromReference(reference);
+  if (!location) return null;
+  if (location.row === dataRow) return { type: "row", column: location.column };
+  const value = cellValue(sheet, location.row, location.column);
+  return typeof value === "number" && Number.isFinite(value) ? { type: "number", value } : null;
+}
+
+function simpleCalculationForReportCell(sheet, formula, dataRow) {
+  const expression = plainText(formula).replace(/^=/, "").replace(/\s+/g, "");
+  if (!expression || /XLOOKUP|INDIRECT|XMATCH/i.test(expression)) return null;
+  const match = expression.match(/^(\$?[A-Z]{1,3}\$?\d+|[-+]?\d+(?:\.\d+)?)([+\-*/])(\$?[A-Z]{1,3}\$?\d+|[-+]?\d+(?:\.\d+)?)$/);
+  if (!match) return null;
+  const asTerm = (token) => {
+    if (/^\$?[A-Z]/i.test(token)) return formulaTerm(sheet, token, dataRow);
+    const value = Number(token);
+    return Number.isFinite(value) ? { type: "number", value } : null;
+  };
+  const left = asTerm(match[1]);
+  const right = asTerm(match[3]);
+  return left && right ? { left, operator: match[2], right } : null;
+}
+
+function masterSectionLayouts(reportSheet) {
+  const range = window.XLSX.utils.decode_range(reportSheet["!ref"]);
+  const usedIds = new Set();
+  const layouts = [];
+  for (let configRow = range.s.r; configRow <= range.e.r - 5; configRow += 1) {
+    if (plainText(cellValue(reportSheet, configRow, 0)).toLowerCase() !== "tab name :") continue;
+    const source = plainText(cellValue(reportSheet, configRow, 1));
+    const titleRow = configRow + 2;
+    const groupRow = configRow + 3;
+    const headerRow = configRow + 4;
+    const dataStart = configRow + 5;
+    const title = plainText(cellValue(reportSheet, titleRow, 0));
+    const lastColumn = lastUsedTableColumn(reportSheet, configRow + 1, configRow + 1, range.e.c);
+    const columns = lastColumn + 1;
+    if (!source || !title || !/\bweek\b/i.test(plainText(cellValue(reportSheet, groupRow, 0))) || columns <= 1) continue;
+    const known = knownSectionMetadata(title);
+    const id = uniqueIdentifier(known?.id || title, usedIds);
+    const layout = {
+      id,
+      label: known?.label || title,
+      accent: known?.accent || dynamicAccentCycle[layouts.length % dynamicAccentCycle.length],
+      title,
+      source,
+      configRow,
+      titleRow,
+      groupRow,
+      headerRow,
+      dataStart,
+      columns,
+    };
+    const sourceColumns = Array.from({ length: columns - 1 }, (_, index) => {
+      const column = index + 1;
+      const formula = formulaAt(reportSheet, dataStart, column);
+      const references = formulaReferences(formula);
+      const sourceReference = references.find((reference) => cellLocationFromReference(reference)?.row === configRow);
+      const fieldReference = references.find((reference) => cellLocationFromReference(reference)?.row === configRow + 1);
+      const sourceLocation = sourceReference && cellLocationFromReference(sourceReference);
+      const fieldLocation = fieldReference && cellLocationFromReference(fieldReference);
+      return {
+        source: sourceLocation ? plainText(cellValue(reportSheet, sourceLocation.row, sourceLocation.column)) || source : source,
+        field: fieldLocation ? plainText(cellValue(reportSheet, fieldLocation.row, fieldLocation.column)) : plainText(cellValue(reportSheet, configRow + 1, column)),
+        calculation: simpleCalculationForReportCell(reportSheet, formula, dataStart),
+      };
+    });
+    layouts.push({
+      ...layout,
+      headers: headersFromSheet(reportSheet, layout),
+      sourceFields: sourceColumns.map(({ field }) => field),
+      sourceColumns,
+      columnStyles: Array.from({ length: columns - 1 }, (_, index) => cellDisplayStyle(reportSheet, dataStart, index + 1)),
+      numberFormats: Array.from({ length: columns - 1 }, (_, index) => cellNumberFormat(reportSheet, dataStart, index + 1)),
+    });
+  }
+  return layouts;
+}
+
+function sourceDataForMaster(workbook, definitions, currentWeek) {
+  const requiredFields = new Map();
+  definitions.forEach((definition) => {
+    if (!requiredFields.has(definition.source)) requiredFields.set(definition.source, new Set());
+    (definition.sourceColumns || definition.sourceFields.map((field) => ({ source: definition.source, field }))).forEach(({ source, field }) => {
+      if (!field) return;
+      if (!requiredFields.has(source)) requiredFields.set(source, new Set());
+      requiredFields.get(source).add(field);
+    });
+  });
+  const sources = {};
+  requiredFields.forEach((fields, sourceName) => {
+    const sheet = workbook.Sheets[sourceName];
+    if (!sheet?.["!ref"]) throw new Error(`The master workbook is missing the ${sourceName} source tab.`);
+    const range = window.XLSX.utils.decode_range(sheet["!ref"]);
+    const columns = new Map();
+    for (let column = range.s.c; column <= range.e.c; column += 1) {
+      const heading = plainText(cellValue(sheet, range.s.r, column));
+      if (heading) columns.set(heading, column);
+    }
+    const dateColumn = columns.get("Date");
+    if (dateColumn === undefined) throw new Error(`The ${sourceName} tab needs a Date column.`);
+    const values = {};
+    for (let row = range.s.r + 1; row <= range.e.r; row += 1) {
+      const week = dateFromExcel(cellValue(sheet, row, dateColumn));
+      if (!week || week > currentWeek) continue;
+      const entry = {};
+      fields.forEach((field) => {
+        const column = columns.get(field);
+        const value = column === undefined ? "Not found" : cellValue(sheet, row, column);
+        // XLOOKUP returns zero when it finds an empty source cell, rather than a blank value.
+        entry[field] = value == null && column !== undefined ? 0 : value;
+      });
+      // XLOOKUP returns the first matching date when a source sheet contains duplicates.
+      if (!values[week]) values[week] = entry;
+    }
+    sources[sourceName] = values;
+  });
+  return sources;
+}
+
+function masterReportModelFromWorkbook(workbook, reportSheet) {
+  const currentWeek = dateFromExcel(cellValue(reportSheet, 1, 13));
+  if (!currentWeek) throw new Error("I could not find the selected week-ending date in Generate Report.");
+  const sections = masterSectionLayouts(reportSheet);
+  if (!sections.length) throw new Error("I could not find the report configuration rows in this master workbook.");
+  const sources = sourceDataForMaster(workbook, sections, currentWeek);
+  const availableWeeks = Object.keys(sources[sections[0].source] || {}).sort();
+  if (!availableWeeks.includes(currentWeek)) throw new Error("The selected week is not available in the master report data.");
+  return {
+    type: "larder-master-report",
+    version: 1,
+    reportTitle: plainText(cellValue(reportSheet, 0, 0)) || "LARDER LICHFIELD | WEEKLY PERFORMANCE REPORT",
+    currentWeek,
+    availableWeeks,
+    overview: overviewCardLayouts(reportSheet, sections).map((layout) => ({
+      id: layout.id,
+      label: layout.label,
+      valueCell: window.XLSX.utils.encode_cell({ r: layout.value[0], c: layout.value[1] }),
+      valueFormula: layout.valueFormula,
+      trendFormula: layout.trendFormula,
+      staticValue: layout.staticValue,
+      staticTrend: layout.staticTrend,
+      numberFormat: layout.numberFormat,
+      lowerIsBetter: layout.lowerIsBetter,
+      sectionId: layout.sectionId,
+    })),
+    sections: sections.map(({ configRow, titleRow, groupRow, headerRow, columns, ...section }) => section),
+    sources,
   };
 }
 
@@ -1147,7 +1580,9 @@ function knownSectionMetadata(title) {
                       : /front.*house.*wage/.test(name) ? "foh"
                         : /chef.*wage/.test(name) ? "chefs"
                           : /(kpi|cleaner)/.test(name) ? "cleaners"
-                            : "";
+                            : /senior.*management/.test(name) ? "senior-management"
+                              : "";
+  if (id === "senior-management") return { id, label: title, accent: "lilac" };
   return sectionLayouts.find((section) => section.id === id) || null;
 }
 
@@ -1214,19 +1649,7 @@ function discoverSectionLayouts(sheet) {
 }
 
 function sectionFromSheet(sheet, layout) {
-  let activeGroup = "";
-  const usedHeaderIds = new Set();
-  const headers = Array.from({ length: layout.columns }, (_, index) => {
-    const groupCell = plainText(cellValue(sheet, layout.groupRow, index));
-    if (groupCell) activeGroup = groupCell;
-    const label = plainText(cellValue(sheet, layout.headerRow, index));
-    const displayLabel = label || activeGroup || `Column ${index + 1}`;
-    return {
-      id: index === 0 ? "week" : uniqueIdentifier(`${activeGroup}-${displayLabel}`, usedHeaderIds),
-      label: displayLabel,
-      group: activeGroup,
-    };
-  });
+  const headers = headersFromSheet(sheet, layout);
   const rows = [];
   for (let rowIndex = layout.dataStart; rowIndex <= layout.dataEnd; rowIndex += 1) {
     const week = dateFromExcel(cellValue(sheet, rowIndex, 0));
@@ -1324,12 +1747,13 @@ async function loadLocalPermissionsPreview() {
       section: "admin",
       week: report.selectedWeek,
       sourceName: "Local preview report",
+      availableWeeks: [report.selectedWeek],
       authMode: "authenticated",
       user: { id: "preview-admin", email: "admin@example.com", name: "Admin preview" },
-      access: { enabled: true, role: "admin", sections: report.sections.map((section) => section.id), canManageUsers: true, canPublish: true },
+      access: { enabled: true, role: "admin", sections: report.sections.map((section) => section.id), dateAccess: { scope: "all" }, canManageUsers: true, canPublish: true },
       adminUsers: [
-        { id: "preview-viewer", name: "Jordan Viewer", email: "jordan@example.com", role: "viewer", enabled: true, sections: ["sales", "covers", "wages"], view: viewerView, isInitialAdmin: false },
-        { id: "preview-owner", name: "Morgan Owner", email: "morgan@example.com", role: "owner", enabled: true, sections: report.sections.map((section) => section.id), view: null, isInitialAdmin: false },
+        { id: "preview-viewer", name: "Jordan Viewer", email: "jordan@example.com", role: "viewer", enabled: true, sections: ["sales", "covers", "wages"], view: viewerView, dateAccess: { scope: "current" }, isInitialAdmin: false },
+        { id: "preview-owner", name: "Morgan Owner", email: "morgan@example.com", role: "owner", enabled: true, sections: report.sections.map((section) => section.id), view: null, dateAccess: { scope: "all" }, isInitialAdmin: false },
       ],
     };
     render();

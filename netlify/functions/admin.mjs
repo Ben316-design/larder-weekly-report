@@ -5,6 +5,7 @@ import {
   hasRecentReauthentication,
   initialAdminEmails,
   normaliseAccessView,
+  normaliseDateAccess,
   publicAccessProfile,
   saveAccess,
   selectedSectionsFromView,
@@ -38,6 +39,7 @@ function requestedAccess(body, role) {
     role,
     sections: selected,
     view,
+    dateAccess: normaliseDateAccess(body.dateAccess),
     canPublish: role === "owner" || Boolean(body.canPublish),
   };
 }
@@ -72,6 +74,7 @@ async function listUsers() {
       enabled: administrator || owner || saved.enabled !== false,
       sections: administrator || owner ? [] : (saved.sections || []),
       view: administrator || owner ? null : saved.view || null,
+      dateAccess: administrator || owner ? { scope: "all" } : normaliseDateAccess(saved.dateAccess),
       canPublish: administrator || owner || Boolean(saved.canPublish),
       lastSignInAt: user.lastSignInAt || "",
       isInitialAdmin: administrator && initialAdmin(user),

@@ -4,7 +4,7 @@ A secure, phone-first viewer for the single-sheet Larder weekly report. Everyone
 
 ## What each role can do
 
-- **Viewer** — sees only the report sections selected for them.
+- **Viewer** — sees only the overview cards, report sections, headings, and figures selected for them.
 - **Owner** — sees every section, can update the weekly report, and can manage Viewer accounts after confirming their own password.
 - **Admin** — has the same full access, and can also create and manage Owner accounts.
 
@@ -16,7 +16,7 @@ Owners must confirm their own account password before publishing a report or cha
 2. In **Identity → Registration preferences**, turn off public registrations. Accounts are then created from the app’s Admin Control Centre.
 3. In **Project configuration → Environment variables**, add `INITIAL_ADMIN_EMAILS` with the email address you will use as the first Admin. Multiple Admin emails can be separated with commas.
 4. In **Identity → Users**, invite the first user with that same email address. Open the invitation email and choose a strong password. Because the email is listed in `INITIAL_ADMIN_EMAILS`, that account becomes the initial Admin after signing in.
-5. Deploy the `main` branch. Open the HTTPS Netlify address, sign in, then use **Report menu → Admin control centre** to add people and select their visible sections.
+5. Deploy the `main` branch. Open the HTTPS Netlify address, sign in, then use **Report menu → Admin control centre** to add people and choose their visible overview cards, sections, and individual figures. Each person’s card also has a **View …’s report** preview button.
 
 You can remove the older `REPORT_UPDATE_KEY` environment variable after this version is deployed; it is no longer used.
 
@@ -27,7 +27,7 @@ You can remove the older `REPORT_UPDATE_KEY` environment variable after this ver
 3. If you are an Owner, confirm your own account password.
 4. Drop in the week’s `.xlsx`, `.xlsm`, or `.xls` report.
 
-The app stores the report centrally and automatically refreshes open reports within one minute. The workbook must contain the **Generate Report** sheet (or have the report as its first sheet).
+The app stores the report centrally and automatically refreshes open reports within one minute. The workbook must contain the **Generate Report** sheet (or have the report as its first sheet). On upload, the reader discovers the weekly tables from their title, headings, and dated rows, so added or renamed report tables appear in the Admin Control Centre automatically. Newly added fields start hidden for Viewers until you select them.
 
 ## Project files
 

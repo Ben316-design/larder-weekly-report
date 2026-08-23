@@ -1,4 +1,4 @@
-import { getUser, verifyRequestOrigin } from "@netlify/identity";
+import { admin, getUser, verifyRequestOrigin } from "@netlify/identity";
 import { getStore } from "@netlify/blobs";
 import { getAccessProfile, hasRecentReauthentication, publicAccessProfile } from "./access.mjs";
 
@@ -25,8 +25,29 @@ function validReport(payload) {
 }
 
 function filterReport(report, access) {
-  const sections = report.sections.filter((section) => access.sections.includes(section.id));
+  if (access.role === "admin" || access.role === "owner") return report;
+  const view = access.view;
+  const sections = report.sections.flatMap((section) => {
+    if (!access.sections.includes(section.id)) return [];
+    const selection = view?.sections?.[section.id];
+    if (view && !selection?.enabled) return [];
+    const allowedHeaders = section.headers.map((header, index) => ({ header, index }))
+      .filter(({ header, index }) => index === 0 || !view || selection.fields.includes("*") || selection.fields.includes(header.id) || selection.fields.includes(String(index)));
+    if (allowedHeaders.length < 2) return [];
+    const valueIndexes = allowedHeaders.slice(1).map(({ index }) => index - 1);
+    return [{
+      ...section,
+      headers: allowedHeaders.map(({ header }) => header),
+      columnStyles: valueIndexes.map((index) => section.columnStyles?.[index]),
+      rows: section.rows.map((row) => ({
+        ...row,
+        values: valueIndexes.map((index) => row.values[index]),
+        numberFormats: valueIndexes.map((index) => row.numberFormats?.[index]),
+      })),
+    }];
+  });
   const overview = report.overview.filter((card) => {
+    if (view) return view.overview?.enabled !== false && (view.overview.cards.includes("*") || view.overview.cards.includes(card.id));
     const sectionId = card.id === "sales-inc" || card.id === "sales-ex" ? "sales" : card.id;
     return access.sections.includes(sectionId);
   });
@@ -40,9 +61,25 @@ export default async function report(request) {
   if (!access.enabled) return json({ error: "Your report access has been disabled." }, 403);
 
   if (request.method === "GET") {
+    const previewUserId = new URL(request.url).searchParams.get("preview");
+    let reportAccess = access;
+    let preview = null;
+    if (previewUserId) {
+      if (!access.canManageUsers) return json({ error: "You do not have permission to preview other reports." }, 403);
+      let previewUser;
+      try {
+        previewUser = await admin.getUser(previewUserId);
+      } catch {
+        return json({ error: "That user could not be found." }, 404);
+      }
+      const previewAccess = await getAccessProfile(previewUser);
+      if (access.role === "owner" && previewAccess.role !== "viewer") return json({ error: "Owners can only preview Viewer reports." }, 403);
+      reportAccess = previewAccess;
+      preview = { id: previewUser.id, name: previewUser.name || previewUser.email || "this user", email: previewUser.email || "" };
+    }
     const savedReport = await reportStore().get(reportKey, { type: "json" });
     if (!savedReport) return json({ error: "No shared report has been published yet." }, 404);
-    return json({ ...savedReport, report: filterReport(savedReport.report, access), access: publicAccessProfile(access) });
+    return json({ ...savedReport, report: filterReport(savedReport.report, reportAccess), access: publicAccessProfile(reportAccess), preview });
   }
 
   if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);

@@ -4,9 +4,10 @@ import {
   getAccessProfile,
   hasRecentReauthentication,
   initialAdminEmails,
+  normaliseAccessView,
   publicAccessProfile,
   saveAccess,
-  sectionIds,
+  selectedSectionsFromView,
 } from "./access.mjs";
 
 function json(body, status = 200) {
@@ -30,11 +31,13 @@ function validRole(value) {
 }
 
 function requestedAccess(body, role) {
-  const selected = Array.isArray(body.sections) ? body.sections : [];
+  const view = normaliseAccessView(body.view);
+  const selected = view ? selectedSectionsFromView(view) : (Array.isArray(body.sections) ? body.sections : []);
   return {
     enabled: body.enabled !== false,
     role,
-    sections: sectionIds.filter((section) => selected.includes(section)),
+    sections: selected,
+    view,
     canPublish: role === "owner" || Boolean(body.canPublish),
   };
 }
@@ -67,7 +70,8 @@ async function listUsers() {
       name: user.name || "",
       role,
       enabled: administrator || owner || saved.enabled !== false,
-      sections: administrator || owner ? [...sectionIds] : sectionIds.filter((section) => saved.sections?.includes(section)),
+      sections: administrator || owner ? [] : (saved.sections || []),
+      view: administrator || owner ? null : saved.view || null,
       canPublish: administrator || owner || Boolean(saved.canPublish),
       lastSignInAt: user.lastSignInAt || "",
       isInitialAdmin: administrator && initialAdmin(user),

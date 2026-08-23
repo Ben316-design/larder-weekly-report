@@ -22,6 +22,7 @@ const sharedReportEndpoint = "/.netlify/functions/report";
 const authEndpoint = "/.netlify/functions/auth";
 const adminEndpoint = "/.netlify/functions/admin";
 const sharedReportPollInterval = 60_000;
+const localPreviewMode = location.hostname === "localhost" && new URLSearchParams(location.search).has("local-preview");
 const lowerIsBetterOverviewIds = new Set(["wages", "foh", "chefs"]);
 let report = null;
 let state = {
@@ -36,10 +37,13 @@ let state = {
   access: null,
   adminUsers: null,
   adminMessage: "",
+  previewUser: null,
+  previewAccess: null,
 };
 let expandedTable = null;
 let sharedReportVersion = "";
 let reportPolling = null;
+let localPreviewSource = null;
 
 const ratioSections = new Set(["overall-gp", "food-gp", "drink-gp", "wages", "foh", "chefs", "cleaners"]);
 const sectionLayouts = [
@@ -57,6 +61,7 @@ const sectionLayouts = [
   { id: "chefs", label: "Chefs", accent: "lilac", titleRow: 249, groupRow: 250, headerRow: 251, dataStart: 252, dataEnd: 264, columns: 10 },
   { id: "cleaners", label: "KPI / cleaners", accent: "lime", titleRow: 268, groupRow: 269, headerRow: 270, dataStart: 271, dataEnd: 283, columns: 10 },
 ];
+const dynamicAccentCycle = ["orange", "green", "lime", "blue", "peach", "lavender", "royal", "burnt", "sky", "lilac"];
 
 const overviewLayouts = [
   { id: "sales-inc", label: "Total sales inc. VAT", value: [5, 0], trend: [15, 0] },
@@ -80,6 +85,17 @@ function escapeHtml(value) {
 
 function plainText(value) {
   return value == null ? "" : String(value).trim();
+}
+
+function slugify(value, fallback = "item") {
+  const slug = plainText(value)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 70);
+  return slug || fallback;
 }
 
 function formatDate(value, short = false) {
@@ -322,14 +338,85 @@ function renderNoReport() {
   return `<section class="auth-page"><div class="auth-card"><p class="eyebrow">WEEKLY REPORT</p><h2>Your account is ready</h2><p>There is no weekly report published yet. An Admin or Owner will upload it shortly.</p><button class="auth-link" type="button" data-action="sign-out">Sign out</button></div></section>`;
 }
 
+function renderPreviewBanner() {
+  if (!state.previewUser) return "";
+  return `<section class="preview-banner"><div><p class="eyebrow">READ-ONLY PREVIEW</p><strong>Viewing ${escapeHtml(state.previewUser.name)}’s report</strong><span>${escapeHtml(state.previewUser.email || "")}</span></div><button type="button" data-action="exit-preview">Back to Admin</button></section>`;
+}
+
 function renderSensitiveAccessCheck() {
   if (state.access?.role === "admin") return "";
   return `<form class="sensitive-access" data-auth-form="reauthenticate"><p><strong>Confirm it is you</strong><span>Enter your own account password before changing users or publishing a report. Confirmation lasts five minutes.</span></p><label>Your password<input required name="password" type="password" autocomplete="current-password"></label><button type="submit">Confirm</button><small class="sensitive-access__message">${escapeHtml(state.adminMessage || "")}</small></form>`;
 }
 
-function accessSectionChoices(selectedSections, disabled = false) {
-  const selected = new Set(selectedSections || []);
-  return `<div class="access-sections">${sectionLayouts.map((section) => `<label><input ${disabled ? "disabled" : ""} type="checkbox" name="sections" value="${section.id}" ${selected.has(section.id) ? "checked" : ""}><span>${escapeHtml(section.label)}</span></label>`).join("")}</div>`;
+function permissionSections() {
+  return report?.sections || sectionLayouts.map((section) => ({ ...section, headers: [{ label: "Week", group: "Week" }] }));
+}
+
+function permissionFieldId(header, index) {
+  return header?.id || String(index);
+}
+
+function hasSelectedField(fields, header, index) {
+  const selections = Array.isArray(fields) ? fields : [];
+  return selections.includes("*") || selections.includes(permissionFieldId(header, index)) || selections.includes(String(index));
+}
+
+function defaultAccessView(selectedSections = permissionSections().map((section) => section.id)) {
+  const selected = new Set(selectedSections);
+  return {
+    overview: { enabled: true, cards: (report?.overview || overviewLayouts).map((card) => card.id) },
+    sections: Object.fromEntries(permissionSections().map((section) => [section.id, {
+      enabled: selected.has(section.id),
+      fields: section.headers.length > 1 ? section.headers.slice(1).map((header, index) => permissionFieldId(header, index + 1)) : ["*"],
+    }])),
+  };
+}
+
+function accessViewForEditor(savedView, legacySections) {
+  if (!savedView) return defaultAccessView(legacySections);
+  const source = defaultAccessView([]);
+  return {
+    overview: {
+      enabled: savedView.overview?.enabled !== false,
+      cards: Array.isArray(savedView.overview?.cards) ? savedView.overview.cards : source.overview.cards,
+    },
+    sections: Object.fromEntries(permissionSections().map((section) => {
+      const saved = savedView.sections?.[section.id];
+      return [section.id, {
+        enabled: saved?.enabled === true,
+        fields: Array.isArray(saved?.fields) ? saved.fields : [],
+      }];
+    })),
+  };
+}
+
+function fieldGroups(section) {
+  const groups = new Map();
+  section.headers.slice(1).forEach((header, index) => {
+    const group = header.group || "Report details";
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group).push({ header, index: index + 1, id: permissionFieldId(header, index + 1) });
+  });
+  return [...groups.entries()];
+}
+
+function renderAccessEditor(savedView, legacySections, disabled = false) {
+  const view = accessViewForEditor(savedView, legacySections);
+  const overviewCards = report?.overview || overviewLayouts;
+  return `<section class="permission-editor">
+    <div class="permission-editor__intro"><strong>What this person can view</strong><span>Choose the overview cards and individual figures that appear in their report.</span></div>
+    <details class="permission-area" open><summary>Overview page</summary><label class="permission-toggle"><input ${disabled ? "disabled" : ""} type="checkbox" name="overviewEnabled" ${view.overview.enabled ? "checked" : ""}><span>Show the overview page</span></label><div class="permission-options">${overviewCards.map((card) => `<label><input ${disabled ? "disabled" : ""} type="checkbox" name="overviewCards" value="${escapeHtml(card.id)}" ${view.overview.cards.includes(card.id) ? "checked" : ""}><span>${escapeHtml(card.label)}</span></label>`).join("")}</div></details>
+    <details class="permission-area" open><summary>Detailed report sections</summary>${permissionSections().map((section) => {
+      const sectionView = view.sections[section.id] || { enabled: false, fields: [] };
+      return `<details class="permission-section"><summary>${escapeHtml(section.label)}</summary><label class="permission-toggle"><input ${disabled ? "disabled" : ""} type="checkbox" name="sectionEnabled" value="${section.id}" ${sectionView.enabled ? "checked" : ""}><span>Show ${escapeHtml(section.label)}</span></label>${section.headers.length > 1 ? fieldGroups(section).map(([group, fields]) => `<div class="permission-field-group"><strong>${escapeHtml(group)}</strong><div class="permission-options">${fields.map(({ header, index, id }) => `<label><input ${disabled ? "disabled" : ""} type="checkbox" name="sectionFields" value="${section.id}:${id}" ${hasSelectedField(sectionView.fields, header, index) ? "checked" : ""}><span>${escapeHtml(header.label)}</span></label>`).join("")}</div></div>`).join("") : '<p class="permission-empty">Upload a report to choose individual figures.</p>'}</details>`;
+    }).join("")}</details>
+  </section>`;
+}
+
+function renderPreviewButton(person) {
+  if (person.id === state.user?.id) return "";
+  const name = person.name || person.email;
+  return `<button class="preview-report-button" type="button" data-action="preview-user" data-user-id="${escapeHtml(person.id)}" data-user-name="${escapeHtml(name)}">View ${escapeHtml(name)}’s report</button>`;
 }
 
 function renderAdmin() {
@@ -337,18 +424,18 @@ function renderAdmin() {
   const isAdmin = state.access?.role === "admin";
   return `<section class="admin-page">
     <button class="back-link" type="button" data-section="overview">&larr; Overview</button>
-    <div class="page-intro"><p class="eyebrow">ADMIN CONTROL CENTRE</p><h2>People and report access</h2><p>Add account holders and choose the report sections each viewer can see. Owners have full access once they confirm their own password.</p></div>
+    <div class="page-intro"><p class="eyebrow">ADMIN CONTROL CENTRE</p><h2>People and report access</h2><p>Set individual overview cards and detailed report figures for each Viewer. Owners always receive the complete report.</p></div>
     ${renderSensitiveAccessCheck()}
-    <section class="admin-create"><h3>Add a person</h3><form data-admin-form="create"><label>Name<input name="name" autocomplete="name" placeholder="Optional"></label><label>Email address<input required name="email" type="email" autocomplete="email" placeholder="person@example.com"></label><label>Temporary password<input required minlength="12" name="password" type="password" autocomplete="new-password" placeholder="At least 12 characters"></label><label>Role<select name="role"><option value="viewer">Viewer</option>${isAdmin ? '<option value="owner">Owner</option>' : ""}</select></label><div class="admin-section-picker"><span>Visible report sections</span>${accessSectionChoices(sectionLayouts.map((section) => section.id))}</div><button class="auth-submit" type="submit">Create account</button></form></section>
+    <section class="admin-create"><h3>Add a person</h3><form data-admin-form="create"><label>Name<input name="name" autocomplete="name" placeholder="Optional"></label><label>Email address<input required name="email" type="email" autocomplete="email" placeholder="person@example.com"></label><label>Temporary password<input required minlength="12" name="password" type="password" autocomplete="new-password" placeholder="At least 12 characters"></label><label>Role<select name="role"><option value="viewer">Viewer</option>${isAdmin ? '<option value="owner">Owner</option>' : ""}</select></label>${renderAccessEditor(null, permissionSections().map((section) => section.id))}<button class="auth-submit" type="submit">Create account</button></form></section>
     <section class="admin-people"><div class="section-label"><span></span>People with access</div>${users === null ? '<p class="admin-loading">Loading people…</p>' : users.map((person) => renderAdminUser(person, isAdmin)).join("")}</section>
   </section>`;
 }
 
 function renderAdminUser(person, isAdmin) {
   const canEdit = !person.isInitialAdmin && (isAdmin || person.role === "viewer");
-  if (!canEdit) return `<article class="admin-user-card"><div><strong>${escapeHtml(person.name || person.email)}</strong><span>${escapeHtml(person.email)}</span></div><p>${person.isInitialAdmin ? "Primary administrator" : "Owner account"} · Full report access</p></article>`;
+  if (!canEdit) return `<article class="admin-user-card"><div><strong>${escapeHtml(person.name || person.email)}</strong><span>${escapeHtml(person.email)}</span></div><p>${person.isInitialAdmin ? "Primary administrator" : "Owner account"} · Full report access</p>${renderPreviewButton(person)}</article>`;
   const owner = person.role === "owner";
-  return `<form class="admin-user-card" data-admin-form="update"><input type="hidden" name="userId" value="${escapeHtml(person.id)}"><div class="admin-user-card__identity"><label>Name<input name="name" value="${escapeHtml(person.name || "")}" autocomplete="name"></label><span>${escapeHtml(person.email)}</span></div><div class="admin-user-card__controls"><label>Role<select name="role"><option value="viewer" ${!owner ? "selected" : ""}>Viewer</option>${isAdmin ? `<option value="owner" ${owner ? "selected" : ""}>Owner</option>` : ""}</select></label><label class="admin-toggle"><input name="enabled" type="checkbox" ${person.enabled ? "checked" : ""}><span>Can sign in</span></label></div><div class="admin-section-picker"><span>Visible report sections${owner ? " (owners always see all sections)" : ""}</span>${accessSectionChoices(person.sections, owner)}</div><button type="submit">Save access</button></form>`;
+  return `<form class="admin-user-card" data-admin-form="update"><input type="hidden" name="userId" value="${escapeHtml(person.id)}"><div class="admin-user-card__identity"><label>Name<input name="name" value="${escapeHtml(person.name || "")}" autocomplete="name"></label><span>${escapeHtml(person.email)}</span></div><div class="admin-user-card__controls"><label>Role<select name="role"><option value="viewer" ${!owner ? "selected" : ""}>Viewer</option>${isAdmin ? `<option value="owner" ${owner ? "selected" : ""}>Owner</option>` : ""}</select></label><label class="admin-toggle"><input name="enabled" type="checkbox" ${person.enabled ? "checked" : ""}><span>Can sign in</span></label></div>${owner ? '<p class="permission-owner">Owners always see the complete report.</p>' : renderAccessEditor(person.view, person.sections)}<div class="admin-user-card__actions">${renderPreviewButton(person)}<button type="submit">Save access</button></div></form>`;
 }
 
 function renderMenu() {
@@ -360,8 +447,8 @@ function renderMenu() {
       <span>${escapeHtml(section.label)}</span><span class="menu-item__chevron">›</span>
     </button>`),
   ];
-  if (!canPublishReport()) menuItems.splice(1, 1);
-  if (canManageUsers()) {
+  if (!canPublishReport() || state.previewUser) menuItems.splice(1, 1);
+  if (canManageUsers() && !state.previewUser) {
     menuItems.splice(1, 0, `<button class="menu-item menu-item--admin ${state.section === "admin" ? "is-active" : ""}" data-section="admin"><span class="menu-item__icon">⚙</span><span>Admin control centre</span><span class="menu-item__chevron">›</span></button>`);
   }
   sectionMenu.innerHTML = menuItems.join("");
@@ -499,7 +586,7 @@ function render() {
   collapseExpandedTable({ restoreFocus: false });
   const authenticated = isSignedIn();
   menuButton.hidden = !authenticated;
-  weekButton.hidden = !authenticated || !canPublishReport();
+  weekButton.hidden = !authenticated || !canPublishReport() || Boolean(state.previewUser);
   if (!authenticated) {
     drawer.classList.remove("is-open");
     drawer.setAttribute("aria-hidden", "true");
@@ -512,7 +599,8 @@ function render() {
   }
   topWeek.textContent = report ? formatDate(state.week || report.selectedWeek, true).replace(/&mdash;/g, "—") : "No report yet";
   renderMenu();
-  app.innerHTML = !report ? (state.section === "admin" ? renderAdmin() : renderNoReport()) : state.section === "overview" ? renderOverview() : state.section === "update-report" ? renderUpdateReport() : state.section === "admin" ? renderAdmin() : renderSection(getSection(state.section));
+  const page = !report ? (state.section === "admin" ? renderAdmin() : renderNoReport()) : state.section === "overview" ? renderOverview() : state.section === "update-report" ? renderUpdateReport() : state.section === "admin" ? renderAdmin() : renderSection(getSection(state.section));
+  app.innerHTML = `${renderPreviewBanner()}${page}`;
   attachDynamicListeners();
   if (state.section === "admin" && state.adminUsers === null) void loadAdminUsers();
 }
@@ -535,8 +623,8 @@ function closeMenu() {
 
 function changeSection(section) {
   const permitted = section === "overview"
-    || (section === "update-report" && canPublishReport())
-    || (section === "admin" && canManageUsers())
+    || (section === "update-report" && canPublishReport() && !state.previewUser)
+    || (section === "admin" && canManageUsers() && !state.previewUser)
     || report?.sections.some((item) => item.id === section);
   if (!permitted) return;
   state.section = section;
@@ -585,12 +673,12 @@ async function beginSignedInExperience() {
     if (!loaded) {
       state = { ...state, authMode: "authenticated", section: canPublishReport() ? "update-report" : "overview", authMessage: "" };
       render();
-      if (!reportPolling) reportPolling = window.setInterval(() => { void loadSharedReport({ renderAfterLoad: true }); }, sharedReportPollInterval);
+      if (!reportPolling) reportPolling = window.setInterval(() => { if (!state.previewUser) void loadSharedReport({ renderAfterLoad: true }); }, sharedReportPollInterval);
       return;
     }
     state = { ...state, authMode: "authenticated", authMessage: "" };
     render();
-    if (!reportPolling) reportPolling = window.setInterval(() => { void loadSharedReport({ renderAfterLoad: true }); }, sharedReportPollInterval);
+    if (!reportPolling) reportPolling = window.setInterval(() => { if (!state.previewUser) void loadSharedReport({ renderAfterLoad: true }); }, sharedReportPollInterval);
   } catch (error) {
     console.error(error);
     authFailure(error.message || "We could not open your account. Please try again.");
@@ -678,12 +766,38 @@ async function loadAdminUsers() {
   if (state.section === "admin") render();
 }
 
+function accessViewFromForm(form) {
+  const formData = new FormData(form);
+  const enabledSections = new Set(formData.getAll("sectionEnabled"));
+  const fields = new Map();
+  formData.getAll("sectionFields").forEach((value) => {
+    const [section, index] = String(value).split(":");
+    if (!fields.has(section)) fields.set(section, []);
+    fields.get(section).push(index);
+  });
+  return {
+    overview: {
+      enabled: formData.get("overviewEnabled") === "on",
+      cards: formData.getAll("overviewCards").map(String),
+    },
+    sections: Object.fromEntries(permissionSections().map((section) => [section.id, {
+      enabled: enabledSections.has(section.id),
+      fields: fields.get(section.id) || [],
+    }])),
+  };
+}
+
 async function submitAdminForm(form) {
+  if (localPreviewMode) {
+    state = { ...state, adminMessage: "This is a local visual preview. Changes are not saved here." };
+    render();
+    return;
+  }
   const formData = new FormData(form);
   const action = form.dataset.adminForm;
   const body = action === "create"
-    ? { action, name: formData.get("name"), email: formData.get("email"), password: formData.get("password"), role: formData.get("role"), sections: formData.getAll("sections") }
-    : { action, userId: formData.get("userId"), name: formData.get("name"), role: formData.get("role"), enabled: formData.get("enabled") === "on", sections: formData.getAll("sections") };
+    ? { action, name: formData.get("name"), email: formData.get("email"), password: formData.get("password"), role: formData.get("role"), view: accessViewFromForm(form) }
+    : { action, userId: formData.get("userId"), name: formData.get("name"), role: formData.get("role"), enabled: formData.get("enabled") === "on", view: accessViewFromForm(form) };
   state = { ...state, adminMessage: action === "create" ? "Creating account…" : "Saving access…" };
   render();
   try {
@@ -756,6 +870,8 @@ function attachDynamicListeners() {
   document.querySelectorAll("[data-section]").forEach((button) => button.addEventListener("click", () => changeSection(button.dataset.section)));
   document.querySelectorAll("[data-action='open-menu']").forEach((button) => button.addEventListener("click", openMenu));
   document.querySelectorAll("[data-action='sign-out']").forEach((button) => button.addEventListener("click", () => { void signOut(); }));
+  document.querySelectorAll("[data-action='preview-user']").forEach((button) => button.addEventListener("click", () => { void previewUserReport(button.dataset.userId); }));
+  document.querySelectorAll("[data-action='exit-preview']").forEach((button) => button.addEventListener("click", () => { void exitPreview(); }));
   document.querySelectorAll("[data-action='choose-upload']").forEach((button) => {
     button.addEventListener("click", () => uploadInput.click());
     button.addEventListener("dragover", (event) => { event.preventDefault(); button.classList.add("is-dragging"); });
@@ -804,18 +920,39 @@ function isSharedReportPayload(payload) {
   return Boolean(payload?.report?.selectedWeek && Array.isArray(payload.report.sections) && Array.isArray(payload.report.overview));
 }
 
-function applySharedReport(payload, { renderAfterLoad = false } = {}) {
+function filterReportForView(source, access) {
+  if (access.role === "admin" || access.role === "owner") return source;
+  const view = access.view;
+  const sections = source.sections.flatMap((section) => {
+    if (!access.sections.includes(section.id)) return [];
+    const selection = view?.sections?.[section.id];
+    if (view && !selection?.enabled) return [];
+    const kept = section.headers.map((header, index) => ({ header, index }))
+      .filter(({ header, index }) => index === 0 || !view || hasSelectedField(selection.fields, header, index));
+    if (kept.length < 2) return [];
+    const values = kept.slice(1).map(({ index }) => index - 1);
+    return [{ ...section, headers: kept.map(({ header }) => header), columnStyles: values.map((index) => section.columnStyles?.[index]), rows: section.rows.map((row) => ({ ...row, values: values.map((index) => row.values[index]), numberFormats: values.map((index) => row.numberFormats?.[index]) })) }];
+  });
+  const overview = source.overview.filter((card) => !view
+    ? access.sections.includes(card.id === "sales-inc" || card.id === "sales-ex" ? "sales" : card.id)
+    : view.overview?.enabled !== false && (view.overview.cards.includes("*") || view.overview.cards.includes(card.id)));
+  return { ...source, overview, sections };
+}
+
+function applySharedReport(payload, { renderAfterLoad = false, preview = false } = {}) {
   if (!isSharedReportPayload(payload)) return false;
   const version = plainText(payload.version || payload.updatedAt);
-  const nextAccess = payload.access || state.access;
-  const versionKey = `${version}|${JSON.stringify(nextAccess || {})}`;
+  const previewing = preview || Boolean(payload.preview);
+  const reportAccess = payload.access || state.access;
+  const nextAccess = previewing ? state.access : reportAccess;
+  const versionKey = `${version}|${payload.preview?.id || ""}|${JSON.stringify(reportAccess || {})}`;
   const hasChanged = !sharedReportVersion || versionKey !== sharedReportVersion;
   if (!hasChanged) return true;
   report = withOverviewTones(payload.report);
   const activeSection = state.section;
   const sectionIsAvailable = activeSection === "overview"
-    || (activeSection === "update-report" && nextAccess?.canPublish)
-    || (activeSection === "admin" && nextAccess?.canManageUsers)
+    || (activeSection === "update-report" && nextAccess?.canPublish && !previewing)
+    || (activeSection === "admin" && nextAccess?.canManageUsers && !previewing)
     || report.sections.some((section) => section.id === activeSection);
   state = {
     ...state,
@@ -824,27 +961,67 @@ function applySharedReport(payload, { renderAfterLoad = false } = {}) {
     sourceName: plainText(payload.sourceName) || "Published report",
     isUploaded: false,
     access: nextAccess,
+    previewUser: previewing ? payload.preview : null,
+    previewAccess: previewing ? reportAccess : null,
   };
   sharedReportVersion = versionKey || report.selectedWeek;
   if (renderAfterLoad || hasChanged) render();
   return true;
 }
 
-async function loadSharedReport({ renderAfterLoad = false } = {}) {
+async function loadSharedReport({ renderAfterLoad = false, previewUserId = "" } = {}) {
   if (location.protocol !== "https:") return false;
   try {
-    const response = await fetch(sharedReportEndpoint, { cache: "no-store", headers: { Accept: "application/json" } });
+    const url = previewUserId ? `${sharedReportEndpoint}?preview=${encodeURIComponent(previewUserId)}` : sharedReportEndpoint;
+    const response = await fetch(url, { cache: "no-store", headers: { Accept: "application/json" } });
     if (response.status === 401) {
       if (isSignedIn()) await signOut();
       return false;
     }
     if (response.status === 404) return false;
     if (!response.ok) throw new Error(`The shared report could not be loaded (${response.status}).`);
-    return applySharedReport(await response.json(), { renderAfterLoad });
+    return applySharedReport(await response.json(), { renderAfterLoad, preview: Boolean(previewUserId) });
   } catch (error) {
     console.warn("The shared report could not be loaded.", error);
     return false;
   }
+}
+
+async function previewUserReport(userId) {
+  if (!userId || !canManageUsers()) return;
+  if (localPreviewMode) {
+    const person = state.adminUsers?.find((user) => user.id === userId);
+    if (!person || !localPreviewSource) return;
+    const previewAccess = person.role === "owner" ? { role: "owner", sections: permissionSections().map((section) => section.id) } : { role: "viewer", sections: person.sections, view: person.view };
+    report = filterReportForView(localPreviewSource, previewAccess);
+    state = { ...state, section: "overview", previewUser: { id: person.id, name: person.name || person.email, email: person.email }, previewAccess };
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  closeMenu();
+  state = { ...state, adminMessage: "Opening report preview…" };
+  render();
+  const loaded = await loadSharedReport({ previewUserId: userId, renderAfterLoad: true });
+  if (!loaded) {
+    state = { ...state, adminMessage: "That report preview could not be opened." };
+    render();
+  }
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function exitPreview() {
+  if (!state.previewUser) return;
+  if (localPreviewMode && localPreviewSource) {
+    report = localPreviewSource;
+    state = { ...state, previewUser: null, previewAccess: null, section: "admin", adminMessage: "" };
+    render();
+    return;
+  }
+  state = { ...state, previewUser: null, previewAccess: null, section: "admin", adminMessage: "" };
+  sharedReportVersion = "";
+  render();
+  await loadSharedReport({ renderAfterLoad: true });
 }
 
 async function publishSharedReport(nextReport, sourceName) {
@@ -928,10 +1105,13 @@ function dateFromExcel(value) {
 
 function reportFromSheet(sheet) {
   if (!sheet || !sheet["!ref"]) throw new Error("The selected sheet is empty.");
+  const layouts = discoverSectionLayouts(sheet);
+  if (!layouts.length) throw new Error("I could not find the weekly report tables in this workbook.");
   const selectedWeek = dateFromExcel(cellValue(sheet, 1, 13));
-  const sections = sectionLayouts.map((layout) => sectionFromSheet(sheet, layout, selectedWeek));
+  const sections = layouts.map((layout) => sectionFromSheet(sheet, layout));
   const firstWeek = sections.find((section) => section.rows[0])?.rows[0]?.week;
-  const week = selectedWeek || firstWeek;
+  const latestWeek = sections.find((section) => section.rows.length)?.rows.at(-1)?.week;
+  const week = selectedWeek || latestWeek || firstWeek;
   if (!week) throw new Error("I could not find the reporting week in this workbook.");
   return {
     reportTitle: plainText(cellValue(sheet, 0, 0)) || "LARDER LICHFIELD | WEEKLY PERFORMANCE REPORT",
@@ -952,13 +1132,100 @@ function reportFromSheet(sheet) {
   };
 }
 
-function sectionFromSheet(sheet, layout, selectedWeek) {
+function knownSectionMetadata(title) {
+  const name = slugify(title);
+  const id = name === "sales" ? "sales"
+    : /covers.*summary/.test(name) ? "covers"
+      : /covers.*lunch/.test(name) ? "lunch"
+        : /covers.*dinner/.test(name) ? "dinner"
+          : /spend.*head/.test(name) ? "sph"
+            : /future.*booking/.test(name) ? "bookings"
+              : /gross.*profit.*overall/.test(name) ? "overall-gp"
+                : /gross.*profit.*food/.test(name) ? "food-gp"
+                  : /gross.*profit.*drink/.test(name) ? "drink-gp"
+                    : /total.*wage/.test(name) ? "wages"
+                      : /front.*house.*wage/.test(name) ? "foh"
+                        : /chef.*wage/.test(name) ? "chefs"
+                          : /(kpi|cleaner)/.test(name) ? "cleaners"
+                            : "";
+  return sectionLayouts.find((section) => section.id === id) || null;
+}
+
+function uniqueIdentifier(base, used) {
+  const safeBase = slugify(base, "section");
+  let candidate = safeBase;
+  let duplicate = 2;
+  while (used.has(candidate)) {
+    candidate = `${safeBase}-${duplicate}`;
+    duplicate += 1;
+  }
+  used.add(candidate);
+  return candidate;
+}
+
+function lastUsedTableColumn(sheet, startRow, endRow, maximumColumn) {
+  let lastColumn = 0;
+  for (let row = startRow; row <= endRow; row += 1) {
+    for (let column = 0; column <= maximumColumn; column += 1) {
+      if (plainText(cellValue(sheet, row, column))) lastColumn = Math.max(lastColumn, column);
+    }
+  }
+  return lastColumn;
+}
+
+function discoverSectionLayouts(sheet) {
+  const range = window.XLSX.utils.decode_range(sheet["!ref"]);
+  const layouts = [];
+  const usedIds = new Set();
+  let row = Math.max(range.s.r, 0);
+
+  while (row <= range.e.r) {
+    if (!dateFromExcel(cellValue(sheet, row, 0))) {
+      row += 1;
+      continue;
+    }
+    const dataStart = row;
+    while (row <= range.e.r && dateFromExcel(cellValue(sheet, row, 0))) row += 1;
+    const dataEnd = row - 1;
+    const titleRow = dataStart - 3;
+    const groupRow = dataStart - 2;
+    const headerRow = dataStart - 1;
+    const title = plainText(cellValue(sheet, titleRow, 0));
+    const hasWeekHeading = /\bweek\b/i.test(plainText(cellValue(sheet, groupRow, 0)));
+    const columns = lastUsedTableColumn(sheet, groupRow, dataEnd, range.e.c) + 1;
+
+    if (dataEnd - dataStart >= 1 && title && hasWeekHeading && columns > 1) {
+      const known = knownSectionMetadata(title);
+      const id = uniqueIdentifier(known?.id || title, usedIds);
+      layouts.push({
+        id,
+        label: known?.label || title,
+        accent: known?.accent || dynamicAccentCycle[layouts.length % dynamicAccentCycle.length],
+        titleRow,
+        groupRow,
+        headerRow,
+        dataStart,
+        dataEnd,
+        columns,
+      });
+    }
+  }
+  return layouts;
+}
+
+function sectionFromSheet(sheet, layout) {
   let activeGroup = "";
+  const usedHeaderIds = new Set();
   const headers = Array.from({ length: layout.columns }, (_, index) => {
     const groupCell = plainText(cellValue(sheet, layout.groupRow, index));
     if (groupCell) activeGroup = groupCell;
     const label = plainText(cellValue(sheet, layout.headerRow, index));
-    return { label: label || activeGroup || `Column ${index + 1}`, group: activeGroup };
+    const displayLabel = label || activeGroup || `Column ${index + 1}`;
+    return {
+      id: index === 0 ? "week" : uniqueIdentifier(`${activeGroup}-${displayLabel}`, usedHeaderIds),
+      label: displayLabel,
+      group: activeGroup,
+    };
   });
   const rows = [];
   for (let rowIndex = layout.dataStart; rowIndex <= layout.dataEnd; rowIndex += 1) {
@@ -1005,6 +1272,10 @@ render();
 void initialiseApplication();
 
 async function initialiseApplication() {
+  if (localPreviewMode) {
+    await loadLocalPermissionsPreview();
+    return;
+  }
   if (location.protocol !== "https:") {
     authFailure("Open the secure Netlify report link to sign in. Local file previews cannot use account access.");
     return;
@@ -1034,5 +1305,35 @@ async function initialiseApplication() {
     else authFailure("");
   } catch (error) {
     authFailure("Sign in to view the current report.");
+  }
+}
+
+async function loadLocalPermissionsPreview() {
+  try {
+    const response = await fetch("./data/report-data.json", { cache: "no-store" });
+    if (!response.ok) throw new Error("The local sample report could not be loaded.");
+    localPreviewSource = withOverviewTones(await response.json());
+    report = localPreviewSource;
+    const viewerView = defaultAccessView(["sales", "covers", "wages"]);
+    viewerView.overview.cards = ["sales-inc", "covers", "wages"];
+    viewerView.sections.sales.fields = ["1", "4", "5", "6", "7", "8", "9", "10"];
+    viewerView.sections.covers.fields = ["1", "2", "3", "4", "5", "6", "7"];
+    viewerView.sections.wages.fields = ["1", "2", "3", "4", "5", "6"];
+    state = {
+      ...state,
+      section: "admin",
+      week: report.selectedWeek,
+      sourceName: "Local preview report",
+      authMode: "authenticated",
+      user: { id: "preview-admin", email: "admin@example.com", name: "Admin preview" },
+      access: { enabled: true, role: "admin", sections: report.sections.map((section) => section.id), canManageUsers: true, canPublish: true },
+      adminUsers: [
+        { id: "preview-viewer", name: "Jordan Viewer", email: "jordan@example.com", role: "viewer", enabled: true, sections: ["sales", "covers", "wages"], view: viewerView, isInitialAdmin: false },
+        { id: "preview-owner", name: "Morgan Owner", email: "morgan@example.com", role: "owner", enabled: true, sections: report.sections.map((section) => section.id), view: null, isInitialAdmin: false },
+      ],
+    };
+    render();
+  } catch (error) {
+    authFailure(error.message || "The local permissions preview could not be started.");
   }
 }

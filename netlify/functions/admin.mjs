@@ -40,7 +40,7 @@ function requestedAccess(body, role) {
     sections: selected,
     view,
     dateAccess: normaliseDateAccess(body.dateAccess),
-    canPublish: role === "owner" || Boolean(body.canPublish),
+    canPublish: role === "owner",
   };
 }
 
@@ -75,7 +75,7 @@ async function listUsers() {
       sections: administrator || owner ? [] : (saved.sections || []),
       view: administrator || owner ? null : saved.view || null,
       dateAccess: administrator || owner ? { scope: "all" } : normaliseDateAccess(saved.dateAccess),
-      canPublish: administrator || owner || Boolean(saved.canPublish),
+      canPublish: administrator || owner,
       lastSignInAt: user.lastSignInAt || "",
       isInitialAdmin: administrator && initialAdmin(user),
     };

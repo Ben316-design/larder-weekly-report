@@ -322,11 +322,11 @@ function isSignedIn() {
 }
 
 function canManageUsers() {
-  return Boolean(state.access?.canManageUsers);
+  return ["admin", "owner"].includes(state.access?.role) && Boolean(state.access?.canManageUsers);
 }
 
 function canPublishReport() {
-  return Boolean(state.access?.canPublish);
+  return ["admin", "owner"].includes(state.access?.role) && Boolean(state.access?.canPublish);
 }
 
 function renderAuthScreen() {
@@ -565,7 +565,6 @@ function renderOverview() {
     <section class="page-intro overview-intro">
       <p class="eyebrow">WEEKLY PERFORMANCE REPORT</p>
       <h2>At a glance</h2>
-      <p>Select a permitted report-ending week. The full 13-week comparison stays in every report section.</p>
     </section>
 
     <section class="week-hero" aria-label="Selected report week">

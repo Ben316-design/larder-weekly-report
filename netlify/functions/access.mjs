@@ -116,7 +116,7 @@ export async function getAccessProfile(user) {
     view: hasFullAccess ? null : saved.view || null,
     dateAccess: hasFullAccess ? { scope: "all" } : normaliseDateAccess(saved.dateAccess),
     canManageUsers: hasFullAccess,
-    canPublish: hasFullAccess || Boolean(saved.canPublish),
+    canPublish: hasFullAccess,
   };
 }
 

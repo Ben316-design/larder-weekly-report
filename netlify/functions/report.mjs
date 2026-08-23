@@ -1,5 +1,6 @@
-import { timingSafeEqual } from "node:crypto";
+import { getUser, verifyRequestOrigin } from "@netlify/identity";
 import { getStore } from "@netlify/blobs";
+import { getAccessProfile, hasRecentReauthentication, publicAccessProfile } from "./access.mjs";
 
 const reportKey = "current-report";
 const maxPayloadBytes = 1_000_000;
@@ -23,32 +24,35 @@ function validReport(payload) {
   return Boolean(report?.selectedWeek && Array.isArray(report.sections) && report.sections.length && Array.isArray(report.overview));
 }
 
-function requestComesFromThisSite(request) {
-  const origin = request.headers.get("origin");
-  return !origin || origin === new URL(request.url).origin;
-}
-
-function hasValidUpdateKey(request) {
-  const expected = process.env.REPORT_UPDATE_KEY;
-  const received = request.headers.get("x-report-update-key") || "";
-  if (!expected) return null;
-  const expectedBytes = Buffer.from(expected);
-  const receivedBytes = Buffer.from(received);
-  return expectedBytes.length === receivedBytes.length && timingSafeEqual(expectedBytes, receivedBytes);
+function filterReport(report, access) {
+  const sections = report.sections.filter((section) => access.sections.includes(section.id));
+  const overview = report.overview.filter((card) => {
+    const sectionId = card.id === "sales-inc" || card.id === "sales-ex" ? "sales" : card.id;
+    return access.sections.includes(sectionId);
+  });
+  return { ...report, overview, sections };
 }
 
 export default async function report(request) {
+  const user = await getUser();
+  if (!user) return json({ error: "Please sign in to view this report." }, 401);
+  const access = await getAccessProfile(user);
+  if (!access.enabled) return json({ error: "Your report access has been disabled." }, 403);
+
   if (request.method === "GET") {
     const savedReport = await reportStore().get(reportKey, { type: "json" });
-    return savedReport ? json(savedReport) : json({ error: "No shared report has been published yet." }, 404);
+    if (!savedReport) return json({ error: "No shared report has been published yet." }, 404);
+    return json({ ...savedReport, report: filterReport(savedReport.report, access), access: publicAccessProfile(access) });
   }
 
   if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
-  if (!requestComesFromThisSite(request)) return json({ error: "This update must come from the Larder report app." }, 403);
-
-  const isAuthorised = hasValidUpdateKey(request);
-  if (isAuthorised === null) return json({ error: "Shared updates have not been configured yet." }, 503);
-  if (!isAuthorised) return json({ error: "The update password is not correct." }, 401);
+  try {
+    verifyRequestOrigin(request);
+  } catch {
+    return json({ error: "This update must come from the Larder report app." }, 403);
+  }
+  if (!access.canPublish) return json({ error: "You do not have permission to publish the weekly report." }, 403);
+  if (!(await hasRecentReauthentication(user.id))) return json({ error: "Confirm your account password before publishing the report." }, 428);
 
   let submittedReport;
   try {
@@ -68,5 +72,5 @@ export default async function report(request) {
     version: crypto.randomUUID(),
   };
   await reportStore().setJSON(reportKey, publishedReport);
-  return json(publishedReport);
+  return json({ ...publishedReport, report: filterReport(publishedReport.report, access), access: publicAccessProfile(access) });
 }

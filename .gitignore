@@ -1,3 +1,7 @@
 scripts/node_modules/
 .report-inspection/
 larder-netlify-deploy*.zip
+node_modules/
+.pnpm-store/
+data/
+report-data.js

@@ -5,3 +5,13 @@
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/data/*"
+  to = "/not-found"
+  status = 404
+
+[[redirects]]
+  from = "/report-data.js"
+  to = "/not-found"
+  status = 404

@@ -1,3 +1,13 @@
+import {
+  acceptInvite,
+  getUser,
+  handleAuthCallback,
+  login,
+  logout,
+  requestPasswordRecovery,
+  updateUser,
+} from "https://cdn.jsdelivr.net/npm/@netlify/identity@2.0.0/+esm";
+
 const app = document.querySelector("#app");
 const sectionMenu = document.querySelector("#section-menu");
 const menuButton = document.querySelector("#menu-button");
@@ -8,21 +18,28 @@ const topWeek = document.querySelector("#top-week");
 const weekButton = document.querySelector("#week-button");
 const uploadInput = document.querySelector("#weekly-report-input");
 
-const fallbackReport = window.LARDER_REPORT_DATA;
-const storageKey = "larder-weekly-report-upload-v2";
 const sharedReportEndpoint = "/.netlify/functions/report";
+const authEndpoint = "/.netlify/functions/auth";
+const adminEndpoint = "/.netlify/functions/admin";
 const sharedReportPollInterval = 60_000;
-const savedReport = loadSavedReport();
 const lowerIsBetterOverviewIds = new Set(["wages", "foh", "chefs"]);
-let report = withOverviewTones(savedReport || fallbackReport);
+let report = null;
 let state = {
   section: "overview",
-  week: report.selectedWeek,
-  sourceName: savedReport ? loadSavedSourceName() : "Published report",
-  isUploaded: Boolean(savedReport),
+  week: "",
+  sourceName: "",
+  isUploaded: false,
+  authMode: "loading",
+  authMessage: "",
+  authToken: "",
+  user: null,
+  access: null,
+  adminUsers: null,
+  adminMessage: "",
 };
 let expandedTable = null;
 let sharedReportVersion = "";
+let reportPolling = null;
 
 const ratioSections = new Set(["overall-gp", "food-gp", "drink-gp", "wages", "foh", "chefs", "cleaners"]);
 const sectionLayouts = [
@@ -271,6 +288,63 @@ function sectionIcon(section) {
   return icons[section.id] || "•";
 }
 
+function isSignedIn() {
+  return state.authMode === "authenticated" && Boolean(report && state.user && state.access);
+}
+
+function canManageUsers() {
+  return Boolean(state.access?.canManageUsers);
+}
+
+function canPublishReport() {
+  return Boolean(state.access?.canPublish);
+}
+
+function renderAuthScreen() {
+  const message = state.authMessage ? `<p class="auth-message">${escapeHtml(state.authMessage)}</p>` : "";
+  if (state.authMode === "loading") {
+    return `<section class="auth-page"><div class="auth-card"><p class="eyebrow">LARDER WEEKLY REPORT</p><h2>Preparing your secure report</h2><p>Checking your sign-in securely.</p></div></section>`;
+  }
+  if (state.authMode === "forgot") {
+    return `<section class="auth-page"><form class="auth-card" data-auth-form="forgot"><p class="eyebrow">ACCOUNT RECOVERY</p><h2>Reset your password</h2><p>Enter your account email and we will send a secure reset link.</p>${message}<label>Email address<input required name="email" type="email" autocomplete="email" placeholder="you@example.com"></label><button class="auth-submit" type="submit">Send reset link</button><button class="auth-link" type="button" data-auth-mode="login">Back to sign in</button></form></section>`;
+  }
+  if (state.authMode === "reset") {
+    return `<section class="auth-page"><form class="auth-card" data-auth-form="reset"><p class="eyebrow">CHOOSE A PASSWORD</p><h2>Set your new password</h2><p>Choose a password with at least 12 characters.</p>${message}<label>New password<input required minlength="12" name="password" type="password" autocomplete="new-password"></label><label>Confirm password<input required minlength="12" name="confirmPassword" type="password" autocomplete="new-password"></label><button class="auth-submit" type="submit">Save new password</button></form></section>`;
+  }
+  if (state.authMode === "invite") {
+    return `<section class="auth-page"><form class="auth-card" data-auth-form="invite"><p class="eyebrow">WELCOME</p><h2>Set up your account</h2><p>Create a password to access the report that has been shared with you.</p>${message}<label>New password<input required minlength="12" name="password" type="password" autocomplete="new-password"></label><label>Confirm password<input required minlength="12" name="confirmPassword" type="password" autocomplete="new-password"></label><button class="auth-submit" type="submit">Activate account</button></form></section>`;
+  }
+  return `<section class="auth-page"><form class="auth-card" data-auth-form="login"><p class="eyebrow">LARDER WEEKLY REPORT</p><h2>Sign in to your report</h2><p>Your report sections are selected by your account administrator.</p>${message}<label>Email address<input required name="email" type="email" autocomplete="email" placeholder="you@example.com"></label><label>Password<input required name="password" type="password" autocomplete="current-password"></label><button class="auth-submit" type="submit">Sign in</button><button class="auth-link" type="button" data-auth-mode="forgot">Forgot your password?</button></form></section>`;
+}
+
+function renderSensitiveAccessCheck() {
+  return `<form class="sensitive-access" data-auth-form="reauthenticate"><p><strong>Confirm it is you</strong><span>Enter your own account password before changing users or publishing a report. Confirmation lasts five minutes.</span></p><label>Your password<input required name="password" type="password" autocomplete="current-password"></label><button type="submit">Confirm</button><small class="sensitive-access__message">${escapeHtml(state.adminMessage || "")}</small></form>`;
+}
+
+function accessSectionChoices(selectedSections, disabled = false) {
+  const selected = new Set(selectedSections || []);
+  return `<div class="access-sections">${sectionLayouts.map((section) => `<label><input ${disabled ? "disabled" : ""} type="checkbox" name="sections" value="${section.id}" ${selected.has(section.id) ? "checked" : ""}><span>${escapeHtml(section.label)}</span></label>`).join("")}</div>`;
+}
+
+function renderAdmin() {
+  const users = state.adminUsers;
+  const isAdmin = state.access?.role === "admin";
+  return `<section class="admin-page">
+    <button class="back-link" type="button" data-section="overview">&larr; Overview</button>
+    <div class="page-intro"><p class="eyebrow">ADMIN CONTROL CENTRE</p><h2>People and report access</h2><p>Add account holders and choose the report sections each viewer can see. Owners have full access once they confirm their own password.</p></div>
+    ${renderSensitiveAccessCheck()}
+    <section class="admin-create"><h3>Add a person</h3><form data-admin-form="create"><label>Name<input name="name" autocomplete="name" placeholder="Optional"></label><label>Email address<input required name="email" type="email" autocomplete="email" placeholder="person@example.com"></label><label>Temporary password<input required minlength="12" name="password" type="password" autocomplete="new-password" placeholder="At least 12 characters"></label><label>Role<select name="role"><option value="viewer">Viewer</option>${isAdmin ? '<option value="owner">Owner</option>' : ""}</select></label><div class="admin-section-picker"><span>Visible report sections</span>${accessSectionChoices(sectionLayouts.map((section) => section.id))}</div><button class="auth-submit" type="submit">Create account</button></form></section>
+    <section class="admin-people"><div class="section-label"><span></span>People with access</div>${users === null ? '<p class="admin-loading">Loading people…</p>' : users.map((person) => renderAdminUser(person, isAdmin)).join("")}</section>
+  </section>`;
+}
+
+function renderAdminUser(person, isAdmin) {
+  const canEdit = !person.isInitialAdmin && (isAdmin || person.role === "viewer");
+  if (!canEdit) return `<article class="admin-user-card"><div><strong>${escapeHtml(person.name || person.email)}</strong><span>${escapeHtml(person.email)}</span></div><p>${person.isInitialAdmin ? "Primary administrator" : "Owner account"} · Full report access</p></article>`;
+  const owner = person.role === "owner";
+  return `<form class="admin-user-card" data-admin-form="update"><input type="hidden" name="userId" value="${escapeHtml(person.id)}"><div class="admin-user-card__identity"><label>Name<input name="name" value="${escapeHtml(person.name || "")}" autocomplete="name"></label><span>${escapeHtml(person.email)}</span></div><div class="admin-user-card__controls"><label>Role<select name="role"><option value="viewer" ${!owner ? "selected" : ""}>Viewer</option>${isAdmin ? `<option value="owner" ${owner ? "selected" : ""}>Owner</option>` : ""}</select></label><label class="admin-toggle"><input name="enabled" type="checkbox" ${person.enabled ? "checked" : ""}><span>Can sign in</span></label></div><div class="admin-section-picker"><span>Visible report sections${owner ? " (owners always see all sections)" : ""}</span>${accessSectionChoices(person.sections, owner)}</div><button type="submit">Save access</button></form>`;
+}
+
 function renderMenu() {
   const menuItems = [
     `<button class="menu-item ${state.section === "overview" ? "is-active" : ""}" data-section="overview"><span class="menu-item__icon">⌂</span><span>Overview</span><span class="menu-item__chevron">›</span></button>`,
@@ -280,30 +354,47 @@ function renderMenu() {
       <span>${escapeHtml(section.label)}</span><span class="menu-item__chevron">›</span>
     </button>`),
   ];
+  if (!canPublishReport()) menuItems.splice(1, 1);
+  if (canManageUsers()) {
+    menuItems.splice(1, 0, `<button class="menu-item menu-item--admin ${state.section === "admin" ? "is-active" : ""}" data-section="admin"><span class="menu-item__icon">⚙</span><span>Admin control centre</span><span class="menu-item__chevron">›</span></button>`);
+  }
   sectionMenu.innerHTML = menuItems.join("");
+  const footer = document.querySelector(".drawer-footer");
+  if (footer) footer.innerHTML = `<span>${escapeHtml(state.user?.email || "")}</span><button type="button" data-action="sign-out">Sign out</button>`;
 }
 
 function renderUploader() {
-  const uploaded = state.isUploaded;
-  const sharedUpdates = canUseSharedUpdates();
-  return `<section class="upload-panel ${uploaded ? "is-uploaded" : ""}" aria-label="Update weekly report">
+  return `<section class="upload-panel" aria-label="Update weekly report">
     <div class="upload-panel__copy">
       <p class="eyebrow">WEEKLY UPDATE</p>
-      <h3>${uploaded ? "This week is ready" : "Update this week's report"}</h3>
-      <p>${sharedUpdates ? "Drop an Excel report here to update the figures for everyone." : "Drop an Excel report here to replace the figures shown on this device."}</p>
+      <h3>Update this week's report</h3>
+      <p>Drop an Excel report here to update the figures for everyone.</p>
     </div>
     <button class="drop-zone" id="report-uploader" type="button" data-action="choose-upload">
       <span class="drop-zone__icon">⇪</span>
       <span><strong>Drop .xlsx file here</strong><small>or tap to choose your weekly report</small></span>
     </button>
     <div class="upload-status" id="upload-status" aria-live="polite"><span>Current source</span><strong>${escapeHtml(state.sourceName)}</strong></div>
-    ${uploaded ? `<button class="reset-report" type="button" data-action="reset-report">Use the published report instead</button>` : ""}
   </section>`;
 }
 
 function renderOverview() {
   const primary = report.overview.slice(0, 4);
   const performance = report.overview.slice(4);
+  const corePerformance = primary.length ? `<section class="overview-group">
+      <div class="section-label"><span></span>Core performance</div>
+      <div class="summary-grid summary-grid--feature">${primary.map(renderSummaryCard).join("")}</div>
+    </section>` : "";
+  const salesPerformance = performance.length ? `<section class="overview-group">
+      <div class="section-label"><span></span>Sales, covers &amp; wages</div>
+      <div class="summary-grid">${performance.map(renderSummaryCard).join("")}</div>
+    </section>` : "";
+  const detailLinks = report.sections.length ? `<section class="quick-links" aria-label="Detailed report sections">
+      <div class="section-label"><span></span>Detailed report</div>
+      ${report.sections.map((section) => `<button class="quick-link accent-${section.accent}" type="button" data-section="${section.id}">
+        <span class="quick-link__icon">${sectionIcon(section)}</span><span>${escapeHtml(section.label)}</span><span>›</span>
+      </button>`).join("")}
+    </section>` : `<section class="error-state"><p class="eyebrow">NO SECTIONS SELECTED</p><h2>Ask an Admin or Owner to choose the report sections for this account.</h2></section>`;
   return `
     <section class="page-intro overview-intro">
       <p class="eyebrow">WEEKLY PERFORMANCE REPORT</p>
@@ -316,35 +407,21 @@ function renderOverview() {
       <button class="text-button" type="button" data-action="open-menu">Browse sections <span>&rarr;</span></button>
     </section>
 
-    <section class="overview-group">
-      <div class="section-label"><span></span>Core performance</div>
-      <div class="summary-grid summary-grid--feature">${primary.map(renderSummaryCard).join("")}</div>
-    </section>
-
-    <section class="overview-group">
-      <div class="section-label"><span></span>Sales, covers &amp; wages</div>
-      <div class="summary-grid">${performance.map(renderSummaryCard).join("")}</div>
-    </section>
-
-    <section class="quick-links" aria-label="Detailed report sections">
-      <div class="section-label"><span></span>Detailed report</div>
-      ${report.sections.map((section) => `<button class="quick-link accent-${section.accent}" type="button" data-section="${section.id}">
-        <span class="quick-link__icon">${sectionIcon(section)}</span><span>${escapeHtml(section.label)}</span><span>›</span>
-      </button>`).join("")}
-    </section>`;
+    ${corePerformance}
+    ${salesPerformance}
+    ${detailLinks}`;
 }
 
 function renderUpdateReport() {
-  const sharedUpdates = canUseSharedUpdates();
   return `
     <section class="update-report-page">
       <button class="back-link" type="button" data-section="overview">&larr; Overview</button>
       <div class="page-intro update-report-intro">
         <p class="eyebrow">WEEKLY REPORT</p>
         <h2>Update report</h2>
-        <p>${sharedUpdates ? "Drag in this week’s Excel report to update the app for everyone." : "This local preview can only update this device. Open the published Netlify app to update everyone."}</p>
+        <p>Drag in this week’s Excel report to update the app for everyone.</p>
       </div>
-      ${sharedUpdates ? `<label class="update-password" for="report-update-key"><span>Update password</span><input id="report-update-key" type="password" autocomplete="current-password" placeholder="Enter your update password"><small>This is only used to publish this week’s report.</small></label>` : ""}
+      ${renderSensitiveAccessCheck()}
       ${renderUploader()}
     </section>`;
 }
@@ -414,10 +491,24 @@ function renderSection(section) {
 
 function render() {
   collapseExpandedTable({ restoreFocus: false });
+  const authenticated = isSignedIn();
+  menuButton.hidden = !authenticated;
+  weekButton.hidden = !authenticated || !canPublishReport();
+  if (!authenticated) {
+    drawer.classList.remove("is-open");
+    drawer.setAttribute("aria-hidden", "true");
+    drawerBackdrop.classList.remove("is-visible");
+    drawerBackdrop.hidden = true;
+    topWeek.textContent = "Secure access";
+    app.innerHTML = renderAuthScreen();
+    attachAuthListeners();
+    return;
+  }
   topWeek.textContent = formatDate(state.week || report.selectedWeek, true).replace(/&mdash;/g, "—");
   renderMenu();
-  app.innerHTML = state.section === "overview" ? renderOverview() : state.section === "update-report" ? renderUpdateReport() : renderSection(getSection(state.section));
+  app.innerHTML = state.section === "overview" ? renderOverview() : state.section === "update-report" ? renderUpdateReport() : state.section === "admin" ? renderAdmin() : renderSection(getSection(state.section));
   attachDynamicListeners();
+  if (state.section === "admin" && state.adminUsers === null) void loadAdminUsers();
 }
 
 function openMenu() {
@@ -437,11 +528,183 @@ function closeMenu() {
 }
 
 function changeSection(section) {
+  const permitted = section === "overview"
+    || (section === "update-report" && canPublishReport())
+    || (section === "admin" && canManageUsers())
+    || report?.sections.some((item) => item.id === section);
+  if (!permitted) return;
   state.section = section;
   closeMenu();
   render();
   window.scrollTo({ top: 0, behavior: "smooth" });
   app.focus({ preventScroll: true });
+}
+
+function formValue(form, name) {
+  return new FormData(form).get(name)?.toString().trim() || "";
+}
+
+function authFailure(message) {
+  report = null;
+  sharedReportVersion = "";
+  state = { ...state, authMode: "login", authMessage: message, user: null, access: null };
+  render();
+}
+
+async function loadAccessProfile() {
+  const response = await fetch(authEndpoint, { cache: "no-store", headers: { Accept: "application/json" } });
+  if (response.status === 401) return null;
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Your account could not be checked.");
+  return payload;
+}
+
+async function beginSignedInExperience() {
+  state = { ...state, authMode: "loading", authMessage: "" };
+  render();
+  try {
+    const profile = await loadAccessProfile();
+    if (!profile?.user) {
+      authFailure("Please sign in to view the report.");
+      return;
+    }
+    if (!profile.access?.enabled) {
+      await logout();
+      authFailure("This account does not currently have access to the report.");
+      return;
+    }
+    state = { ...state, user: profile.user, access: profile.access };
+    const loaded = await loadSharedReport();
+    if (!state.user) return;
+    if (!loaded) {
+      state = { ...state, authMode: "login", authMessage: "Your account is ready, but there is no published report yet." };
+      render();
+      return;
+    }
+    state = { ...state, authMode: "authenticated", authMessage: "" };
+    render();
+    if (!reportPolling) reportPolling = window.setInterval(() => { void loadSharedReport({ renderAfterLoad: true }); }, sharedReportPollInterval);
+  } catch (error) {
+    console.error(error);
+    authFailure(error.message || "We could not open your account. Please try again.");
+  }
+}
+
+function attachAuthListeners() {
+  document.querySelectorAll("[data-auth-mode]").forEach((button) => button.addEventListener("click", () => {
+    state = { ...state, authMode: button.dataset.authMode, authMessage: "" };
+    render();
+  }));
+  document.querySelectorAll("[data-auth-form='login']").forEach((form) => form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const email = formValue(form, "email");
+    const password = formValue(form, "password");
+    state = { ...state, authMode: "loading", authMessage: "" };
+    render();
+    try {
+      await login(email, password);
+      await beginSignedInExperience();
+    } catch (error) {
+      authFailure(error.message || "That email address or password is not recognised.");
+    }
+  }));
+  document.querySelectorAll("[data-auth-form='forgot']").forEach((form) => form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await requestPasswordRecovery(formValue(form, "email"));
+      state = { ...state, authMessage: "If that account exists, a reset email is on its way." };
+      render();
+    } catch (error) {
+      state = { ...state, authMessage: error.message || "The reset email could not be sent." };
+      render();
+    }
+  }));
+  document.querySelectorAll("[data-auth-form='reset'], [data-auth-form='invite']").forEach((form) => form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const password = formValue(form, "password");
+    if (password !== formValue(form, "confirmPassword")) {
+      state = { ...state, authMessage: "The two passwords do not match." };
+      render();
+      return;
+    }
+    state = { ...state, authMode: "loading", authMessage: "" };
+    render();
+    try {
+      if (form.dataset.authForm === "invite") await acceptInvite(state.authToken, password);
+      else await updateUser({ password });
+      await beginSignedInExperience();
+    } catch (error) {
+      authFailure(error.message || "Your password could not be saved.");
+    }
+  }));
+  document.querySelectorAll("[data-auth-form='reauthenticate']").forEach((form) => form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void confirmSensitiveAccess(form);
+  }));
+}
+
+async function confirmSensitiveAccess(form) {
+  const password = formValue(form, "password");
+  if (!password) return;
+  state = { ...state, adminMessage: "Confirming your password…" };
+  render();
+  try {
+    const response = await fetch(authEndpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reauthenticate", password }) });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Your password could not be confirmed.");
+    state = { ...state, adminMessage: "Confirmed. You can now make changes for the next five minutes." };
+  } catch (error) {
+    state = { ...state, adminMessage: error.message || "Your password could not be confirmed." };
+  }
+  render();
+}
+
+async function loadAdminUsers() {
+  try {
+    const response = await fetch(adminEndpoint, { cache: "no-store", headers: { Accept: "application/json" } });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "People could not be loaded.");
+    state = { ...state, adminUsers: payload.users || [] };
+  } catch (error) {
+    state = { ...state, adminUsers: [], adminMessage: error.message || "People could not be loaded." };
+  }
+  if (state.section === "admin") render();
+}
+
+async function submitAdminForm(form) {
+  const formData = new FormData(form);
+  const action = form.dataset.adminForm;
+  const body = action === "create"
+    ? { action, name: formData.get("name"), email: formData.get("email"), password: formData.get("password"), role: formData.get("role"), sections: formData.getAll("sections") }
+    : { action, userId: formData.get("userId"), name: formData.get("name"), role: formData.get("role"), enabled: formData.get("enabled") === "on", sections: formData.getAll("sections") };
+  state = { ...state, adminMessage: action === "create" ? "Creating account…" : "Saving access…" };
+  render();
+  try {
+    const response = await fetch(adminEndpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const payload = await response.json().catch(() => ({}));
+    if (response.status === 428) throw new Error("Confirm your own password above before making this change.");
+    if (!response.ok) throw new Error(payload.error || "The access change could not be saved.");
+    state = { ...state, adminUsers: payload.users || [], adminMessage: action === "create" ? "Account created. Share the temporary password with the person securely." : "Access saved." };
+  } catch (error) {
+    state = { ...state, adminMessage: error.message || "The access change could not be saved." };
+  }
+  render();
+}
+
+async function signOut() {
+  try {
+    await logout();
+  } catch (error) {
+    console.warn("The account could not be signed out cleanly.", error);
+  }
+  if (reportPolling) {
+    window.clearInterval(reportPolling);
+    reportPolling = null;
+  }
+  report = null;
+  sharedReportVersion = "";
+  state = { section: "overview", week: "", sourceName: "", isUploaded: false, authMode: "login", authMessage: "You have signed out.", authToken: "", user: null, access: null, adminUsers: null, adminMessage: "" };
+  render();
 }
 
 function updateExpandedTableViewport() {
@@ -485,6 +748,7 @@ function collapseExpandedTable({ restoreFocus = true } = {}) {
 function attachDynamicListeners() {
   document.querySelectorAll("[data-section]").forEach((button) => button.addEventListener("click", () => changeSection(button.dataset.section)));
   document.querySelectorAll("[data-action='open-menu']").forEach((button) => button.addEventListener("click", openMenu));
+  document.querySelectorAll("[data-action='sign-out']").forEach((button) => button.addEventListener("click", () => { void signOut(); }));
   document.querySelectorAll("[data-action='choose-upload']").forEach((button) => {
     button.addEventListener("click", () => uploadInput.click());
     button.addEventListener("dragover", (event) => { event.preventDefault(); button.classList.add("is-dragging"); });
@@ -495,7 +759,14 @@ function attachDynamicListeners() {
       handleUpload(event.dataTransfer.files);
     });
   });
-  document.querySelectorAll("[data-action='reset-report']").forEach((button) => button.addEventListener("click", resetReport));
+  document.querySelectorAll("[data-auth-form='reauthenticate']").forEach((form) => form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void confirmSensitiveAccess(form);
+  }));
+  document.querySelectorAll("[data-admin-form]").forEach((form) => form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void submitAdminForm(form);
+  }));
   document.querySelectorAll("[data-action='expand-table']").forEach((table) => {
     table.addEventListener("click", (event) => {
       if (!event.target.closest("[data-action='collapse-table']")) expandTable(table);
@@ -519,7 +790,7 @@ function setUploadStatus(message, kind = "") {
 }
 
 function canUseSharedUpdates() {
-  return location.protocol === "https:";
+  return location.protocol === "https:" && canPublishReport();
 }
 
 function isSharedReportPayload(payload) {
@@ -529,24 +800,37 @@ function isSharedReportPayload(payload) {
 function applySharedReport(payload, { renderAfterLoad = false } = {}) {
   if (!isSharedReportPayload(payload)) return false;
   const version = plainText(payload.version || payload.updatedAt);
-  const hasChanged = !sharedReportVersion || version !== sharedReportVersion;
+  const nextAccess = payload.access || state.access;
+  const versionKey = `${version}|${JSON.stringify(nextAccess || {})}`;
+  const hasChanged = !sharedReportVersion || versionKey !== sharedReportVersion;
   if (!hasChanged) return true;
   report = withOverviewTones(payload.report);
+  const activeSection = state.section;
+  const sectionIsAvailable = activeSection === "overview"
+    || (activeSection === "update-report" && nextAccess?.canPublish)
+    || (activeSection === "admin" && nextAccess?.canManageUsers)
+    || report.sections.some((section) => section.id === activeSection);
   state = {
     ...state,
+    section: sectionIsAvailable ? activeSection : "overview",
     week: report.selectedWeek,
     sourceName: plainText(payload.sourceName) || "Published report",
     isUploaded: false,
+    access: nextAccess,
   };
-  sharedReportVersion = version || report.selectedWeek;
+  sharedReportVersion = versionKey || report.selectedWeek;
   if (renderAfterLoad || hasChanged) render();
   return true;
 }
 
 async function loadSharedReport({ renderAfterLoad = false } = {}) {
-  if (!canUseSharedUpdates()) return false;
+  if (location.protocol !== "https:") return false;
   try {
     const response = await fetch(sharedReportEndpoint, { cache: "no-store", headers: { Accept: "application/json" } });
+    if (response.status === 401) {
+      if (isSignedIn()) await signOut();
+      return false;
+    }
     if (response.status === 404) return false;
     if (!response.ok) throw new Error(`The shared report could not be loaded (${response.status}).`);
     return applySharedReport(await response.json(), { renderAfterLoad });
@@ -557,19 +841,16 @@ async function loadSharedReport({ renderAfterLoad = false } = {}) {
 }
 
 async function publishSharedReport(nextReport, sourceName) {
-  const updateKey = document.querySelector("#report-update-key")?.value.trim();
-  if (!updateKey) throw new Error("Enter the update password before publishing the report.");
   const response = await fetch(sharedReportEndpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Report-Update-Key": updateKey,
     },
     body: JSON.stringify({ report: nextReport, sourceName }),
   });
   const payload = await response.json().catch(() => ({}));
-  if (response.status === 401) throw new Error("That update password is not correct.");
-  if (response.status === 503) throw new Error("Shared updates have not been configured in Netlify yet.");
+  if (response.status === 428) throw new Error("Confirm your own password above before publishing this report.");
+  if (response.status === 401) throw new Error("Your sign-in has expired. Please sign in again.");
   if (!response.ok) throw new Error(payload.error || "The report could not be published for everyone.");
   if (!isSharedReportPayload(payload)) throw new Error("The shared report was saved, but its confirmation was incomplete.");
   return payload;
@@ -592,13 +873,7 @@ async function handleUpload(files) {
     const sheetName = workbook.SheetNames.find((name) => /generate\s*report/i.test(name)) || workbook.SheetNames[0];
     if (!sheetName) throw new Error("The workbook does not contain a report sheet.");
     const nextReport = reportFromSheet(workbook.Sheets[sheetName]);
-    if (!canUseSharedUpdates()) {
-      report = withOverviewTones(nextReport);
-      state = { section: "overview", week: nextReport.selectedWeek, sourceName: file.name, isUploaded: true };
-      saveReport(nextReport, file.name);
-      render();
-      return;
-    }
+    if (!canUseSharedUpdates()) throw new Error("Only an Administrator or Owner can update the shared report.");
     setUploadStatus("Publishing this week for everyone…", "is-loading");
     const sharedReport = await publishSharedReport(nextReport, file.name);
     applySharedReport(sharedReport, { renderAfterLoad: true });
@@ -699,39 +974,6 @@ function sectionFromSheet(sheet, layout, selectedWeek) {
   };
 }
 
-function loadSavedReport() {
-  try {
-    const saved = JSON.parse(window.localStorage.getItem(storageKey));
-    return saved?.report?.sections?.length ? saved.report : null;
-  } catch {
-    return null;
-  }
-}
-
-function loadSavedSourceName() {
-  try {
-    return JSON.parse(window.localStorage.getItem(storageKey))?.sourceName || "Published report";
-  } catch {
-    return "Published report";
-  }
-}
-
-function saveReport(nextReport, sourceName) {
-  try {
-    window.localStorage.setItem(storageKey, JSON.stringify({ report: nextReport, sourceName }));
-  } catch {
-    // The report is still displayed for this visit if the browser blocks local storage.
-  }
-}
-
-function resetReport() {
-  try { window.localStorage.removeItem(storageKey); } catch { /* no-op */ }
-  report = withOverviewTones(fallbackReport);
-  state = { section: "overview", week: report.selectedWeek, sourceName: "Published report", isUploaded: false };
-  render();
-  void loadSharedReport({ renderAfterLoad: true });
-}
-
 uploadInput.addEventListener("change", (event) => handleUpload(event.target.files));
 menuButton.addEventListener("click", openMenu);
 closeMenuButton.addEventListener("click", closeMenu);
@@ -753,27 +995,37 @@ window.addEventListener("orientationchange", () => {
 });
 
 render();
-loadInitialReport();
+void initialiseApplication();
 
-async function loadInitialReport() {
-  const loadedSharedReport = await loadSharedReport({ renderAfterLoad: true });
-  if (!loadedSharedReport) await loadPublishedWorkbook();
-  if (canUseSharedUpdates()) window.setInterval(() => { void loadSharedReport(); }, sharedReportPollInterval);
-}
-
-async function loadPublishedWorkbook() {
-  if (!window.XLSX || location.protocol === "file:") return;
+async function initialiseApplication() {
+  if (location.protocol !== "https:") {
+    authFailure("Open the secure Netlify report link to sign in. Local file previews cannot use account access.");
+    return;
+  }
+  const hashParameters = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const inviteToken = hashParameters.get("invite_token") || new URLSearchParams(location.search).get("invite_token");
+  const recoveryToken = hashParameters.get("recovery_token") || new URLSearchParams(location.search).get("recovery_token");
+  let callback = null;
   try {
-    const response = await fetch("./data/weekly-report.xlsx", { cache: "no-store" });
-    if (!response.ok) return;
-    const workbook = window.XLSX.read(await response.arrayBuffer(), { type: "array", cellNF: true, cellText: true, cellStyles: true });
-    const sheetName = workbook.SheetNames.find((name) => /generate\s*report/i.test(name)) || workbook.SheetNames[0];
-    if (!sheetName) return;
-    const publishedReport = reportFromSheet(workbook.Sheets[sheetName]);
-    report = withOverviewTones(publishedReport);
-    state = { section: "overview", week: publishedReport.selectedWeek, sourceName: "Published report", isUploaded: false };
-    render();
+    callback = await handleAuthCallback();
   } catch (error) {
-    console.warn("The published report file could not be loaded.", error);
+    console.warn("The account link could not be processed automatically.", error);
+  }
+  if (callback?.type === "invite" || inviteToken) {
+    state = { ...state, authMode: "invite", authToken: callback?.token || inviteToken || "", authMessage: "" };
+    render();
+    return;
+  }
+  if (callback?.type === "recovery" || recoveryToken) {
+    state = { ...state, authMode: "reset", authToken: recoveryToken || "", authMessage: "" };
+    render();
+    return;
+  }
+  try {
+    const currentUser = await getUser();
+    if (currentUser) await beginSignedInExperience();
+    else authFailure("");
+  } catch (error) {
+    authFailure("Sign in to view the current report.");
   }
 }

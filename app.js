@@ -289,7 +289,7 @@ function sectionIcon(section) {
 }
 
 function isSignedIn() {
-  return state.authMode === "authenticated" && Boolean(report && state.user && state.access);
+  return state.authMode === "authenticated" && Boolean(state.user && state.access);
 }
 
 function canManageUsers() {
@@ -315,6 +315,11 @@ function renderAuthScreen() {
     return `<section class="auth-page"><form class="auth-card" data-auth-form="invite"><p class="eyebrow">WELCOME</p><h2>Set up your account</h2><p>Create a password to access the report that has been shared with you.</p>${message}<label>New password<input required minlength="12" name="password" type="password" autocomplete="new-password"></label><label>Confirm password<input required minlength="12" name="confirmPassword" type="password" autocomplete="new-password"></label><button class="auth-submit" type="submit">Activate account</button></form></section>`;
   }
   return `<section class="auth-page"><form class="auth-card" data-auth-form="login"><p class="eyebrow">LARDER WEEKLY REPORT</p><h2>Sign in to your report</h2><p>Your report sections are selected by your account administrator.</p>${message}<label>Email address<input required name="email" type="email" autocomplete="email" placeholder="you@example.com"></label><label>Password<input required name="password" type="password" autocomplete="current-password"></label><button class="auth-submit" type="submit">Sign in</button><button class="auth-link" type="button" data-auth-mode="forgot">Forgot your password?</button></form></section>`;
+}
+
+function renderNoReport() {
+  if (canPublishReport()) return renderUpdateReport();
+  return `<section class="auth-page"><div class="auth-card"><p class="eyebrow">WEEKLY REPORT</p><h2>Your account is ready</h2><p>There is no weekly report published yet. An Admin or Owner will upload it shortly.</p><button class="auth-link" type="button" data-action="sign-out">Sign out</button></div></section>`;
 }
 
 function renderSensitiveAccessCheck() {
@@ -349,7 +354,7 @@ function renderMenu() {
   const menuItems = [
     `<button class="menu-item ${state.section === "overview" ? "is-active" : ""}" data-section="overview"><span class="menu-item__icon">⌂</span><span>Overview</span><span class="menu-item__chevron">›</span></button>`,
     `<button class="menu-item menu-item--update ${state.section === "update-report" ? "is-active" : ""}" data-section="update-report"><span class="menu-item__icon">↥</span><span>Update report</span><span class="menu-item__chevron">›</span></button>`,
-    ...report.sections.map((section) => `<button class="menu-item ${state.section === section.id ? "is-active" : ""}" data-section="${section.id}">
+    ...(report?.sections || []).map((section) => `<button class="menu-item ${state.section === section.id ? "is-active" : ""}" data-section="${section.id}">
       <span class="menu-item__icon accent-${section.accent}">${sectionIcon(section)}</span>
       <span>${escapeHtml(section.label)}</span><span class="menu-item__chevron">›</span>
     </button>`),
@@ -504,9 +509,9 @@ function render() {
     attachAuthListeners();
     return;
   }
-  topWeek.textContent = formatDate(state.week || report.selectedWeek, true).replace(/&mdash;/g, "—");
+  topWeek.textContent = report ? formatDate(state.week || report.selectedWeek, true).replace(/&mdash;/g, "—") : "No report yet";
   renderMenu();
-  app.innerHTML = state.section === "overview" ? renderOverview() : state.section === "update-report" ? renderUpdateReport() : state.section === "admin" ? renderAdmin() : renderSection(getSection(state.section));
+  app.innerHTML = !report ? (state.section === "admin" ? renderAdmin() : renderNoReport()) : state.section === "overview" ? renderOverview() : state.section === "update-report" ? renderUpdateReport() : state.section === "admin" ? renderAdmin() : renderSection(getSection(state.section));
   attachDynamicListeners();
   if (state.section === "admin" && state.adminUsers === null) void loadAdminUsers();
 }
@@ -577,8 +582,9 @@ async function beginSignedInExperience() {
     const loaded = await loadSharedReport();
     if (!state.user) return;
     if (!loaded) {
-      state = { ...state, authMode: "login", authMessage: "Your account is ready, but there is no published report yet." };
+      state = { ...state, authMode: "authenticated", section: canPublishReport() ? "update-report" : "overview", authMessage: "" };
       render();
+      if (!reportPolling) reportPolling = window.setInterval(() => { void loadSharedReport({ renderAfterLoad: true }); }, sharedReportPollInterval);
       return;
     }
     state = { ...state, authMode: "authenticated", authMessage: "" };

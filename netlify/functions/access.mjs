@@ -70,6 +70,7 @@ export async function getAccessProfile(user) {
 
 export function publicAccessProfile(access) {
   return {
+    enabled: access.enabled,
     role: access.role,
     sections: access.sections,
     canManageUsers: access.canManageUsers,

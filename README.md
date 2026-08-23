@@ -15,7 +15,7 @@ Owners and Admins must confirm their own account password before publishing a re
 1. In Netlify, open **Project configuration → Identity** and select **Enable Identity**.
 2. In **Identity → Registration preferences**, turn off public registrations. Accounts are then created from the app’s Admin Control Centre.
 3. In **Project configuration → Environment variables**, add `INITIAL_ADMIN_EMAILS` with the email address you will use as the first Admin. Multiple Admin emails can be separated with commas.
-4. In **Identity → Users**, create the first user with that same email address and a strong password. Because the email is listed in `INITIAL_ADMIN_EMAILS`, that account becomes the initial Admin after signing in.
+4. In **Identity → Users**, invite the first user with that same email address. Open the invitation email and choose a strong password. Because the email is listed in `INITIAL_ADMIN_EMAILS`, that account becomes the initial Admin after signing in.
 5. Deploy the `main` branch. Open the HTTPS Netlify address, sign in, then use **Report menu → Admin control centre** to add people and select their visible sections.
 
 You can remove the older `REPORT_UPDATE_KEY` environment variable after this version is deployed; it is no longer used.

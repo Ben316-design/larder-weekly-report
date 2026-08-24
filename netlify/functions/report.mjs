@@ -45,6 +45,9 @@ function reportSelection(savedReport, access, requestedWeek = "") {
 }
 
 function publicReportPayload(savedReport, report, access, availableWeeks, preview = null) {
+  const executive = !preview && ["admin", "owner"].includes(access.role)
+    ? savedReport?.model?.executive || null
+    : null;
   return {
     report: filterReport(report, access),
     sourceName: savedReport.sourceName,
@@ -53,6 +56,7 @@ function publicReportPayload(savedReport, report, access, availableWeeks, previe
     availableWeeks,
     access: publicAccessProfile(access),
     preview,
+    executive,
   };
 }
 

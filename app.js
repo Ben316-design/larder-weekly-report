@@ -46,6 +46,8 @@ let state = {
   taskData: null,
   taskMessage: "",
   menuMode: "report",
+  executive: null,
+  executivePeriod: "",
 };
 let expandedTable = null;
 let sharedReportVersion = "";
@@ -339,6 +341,10 @@ function canPublishReport() {
   return ["admin", "owner"].includes(state.access?.role) && Boolean(state.access?.canPublish);
 }
 
+function canViewExecutiveDashboard() {
+  return canManageUsers() && !state.previewUser;
+}
+
 function renderAuthScreen() {
   const message = state.authMessage ? `<p class="auth-message">${escapeHtml(state.authMessage)}</p>` : "";
   if (state.authMode === "loading") {
@@ -385,6 +391,11 @@ function renderHub() {
       ${canManageUsers() ? `<button class="hub-menu-card hub-menu-card--users" type="button" data-section="users">
         <span class="hub-menu-card__icon" aria-hidden="true">♙</span>
         <span><strong>Users</strong><small>Create accounts, manage sign-in access, and review activity</small></span>
+        <span class="hub-menu-card__arrow" aria-hidden="true">›</span>
+      </button>` : ""}
+      ${canViewExecutiveDashboard() ? `<button class="hub-menu-card hub-menu-card--executive" type="button" data-section="executive">
+        <span class="hub-menu-card__icon" aria-hidden="true">↗</span>
+        <span><strong>Executive dashboard</strong><small>Explore long-term business performance and the leading indicators ahead</small></span>
         <span class="hub-menu-card__arrow" aria-hidden="true">›</span>
       </button>` : ""}
     </section>
@@ -471,6 +482,194 @@ function renderTasks() {
     ${awaitingReview.length ? `<section class="task-list-section"><div class="section-label"><span></span>Ready for your review</div><div class="task-list">${awaitingReview.map(renderTaskCard).join("")}</div></section>` : ""}
     ${completed.length ? `<section class="task-list-section"><div class="section-label"><span></span>Recently completed</div><div class="task-list">${completed.slice(0, 8).map(renderTaskCard).join("")}</div></section>` : ""}
     <section class="task-notifications"><div class="task-notifications__heading"><div class="section-label"><span></span>Updates</div>${unreadNotifications ? `<button type="button" data-action="mark-task-notifications-read">Mark all read</button>` : ""}</div>${notifications.length ? `<div>${notifications.slice(0, 12).map((note) => `<article class="task-notification ${note.readAt ? "" : "is-unread"}"><strong>${escapeHtml(note.title)}</strong><span>${escapeHtml(note.message)}</span><small>${escapeHtml(formatDateTime(note.createdAt))}</small></article>`).join("")}</div>` : '<p class="task-empty">Task updates will appear here.</p>'}</section>
+  </section>`;
+}
+
+function executiveRows() {
+  const data = state.executive;
+  if (!data?.rows || !Array.isArray(data.weeks)) return [];
+  return data.weeks.map((week) => ({ week, ...data.rows[week] })).filter((row) => row.week);
+}
+
+function executiveYears() {
+  return [...new Set(executiveRows().map((row) => row.week.slice(0, 4)))].sort();
+}
+
+function defaultExecutivePeriod() {
+  return executiveYears().at(-1) || "all";
+}
+
+function executivePeriodWeeks() {
+  const allWeeks = executiveRows().map((row) => row.week);
+  const period = state.executivePeriod || defaultExecutivePeriod();
+  if (period === "latest-13") return allWeeks.slice(-13);
+  if (period === "all") return allWeeks;
+  return allWeeks.filter((week) => week.startsWith(`${period}-`));
+}
+
+function executivePeriodTitle() {
+  const period = state.executivePeriod || defaultExecutivePeriod();
+  if (period === "latest-13") return "Latest 13 weeks";
+  if (period === "all") return "All available weeks";
+  return `${period} to date`;
+}
+
+function executiveValue(row, key) {
+  const value = Number(row?.[key]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function executiveMetric(rows, key, aggregate = "mean") {
+  const values = rows.map((row) => executiveValue(row, key)).filter((value) => value !== null);
+  if (!values.length) return null;
+  return aggregate === "sum" ? values.reduce((total, value) => total + value, 0) : values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+function executiveRowsForWeeks(weeks) {
+  const entries = state.executive?.rows || {};
+  return weeks.map((week) => ({ week, ...entries[week] })).filter((row) => Object.prototype.hasOwnProperty.call(entries, row.week));
+}
+
+function executiveComparableRows(weeks) {
+  const entries = state.executive?.rows || {};
+  const sameWeeksLastYear = weeks.map((week) => {
+    const date = new Date(`${week}T12:00:00Z`);
+    date.setUTCDate(date.getUTCDate() - 364);
+    return date.toISOString().slice(0, 10);
+  });
+  return executiveRowsForWeeks(sameWeeksLastYear).filter((row) => Object.keys(row).length > 1);
+}
+
+function executiveFormat(value, kind = "number") {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+  if (kind === "currency") return new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 }).format(value);
+  if (kind === "percentage") return new Intl.NumberFormat("en-GB", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(value);
+  if (kind === "decimal") return new Intl.NumberFormat("en-GB", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(value);
+  return new Intl.NumberFormat("en-GB", { maximumFractionDigits: 0 }).format(value);
+}
+
+function executiveChange(current, previous) {
+  if (!Number.isFinite(current) || !Number.isFinite(previous) || previous === 0) return null;
+  return (current - previous) / Math.abs(previous);
+}
+
+function executiveTrend(current, previous, { lowerIsBetter = false, label = "same weeks last year" } = {}) {
+  const change = executiveChange(current, previous);
+  if (change === null) return { tone: "neutral", text: "No comparable period" };
+  const direction = change > 0 ? "Up" : change < 0 ? "Down" : "Unchanged";
+  const good = change === 0 || (lowerIsBetter ? change < 0 : change > 0);
+  return { tone: change === 0 ? "neutral" : good ? "positive" : "negative", text: `${direction} ${Math.abs(change).toLocaleString("en-GB", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 })} vs ${label}` };
+}
+
+function renderExecutiveKpi({ label, key, kind, aggregate = "mean", lowerIsBetter = false, rows, comparisonRows }) {
+  const current = executiveMetric(rows, key, aggregate);
+  const previous = executiveMetric(comparisonRows, key, aggregate);
+  const trend = executiveTrend(current, previous, { lowerIsBetter });
+  return `<article class="executive-kpi executive-kpi--${trend.tone}"><span>${escapeHtml(label)}</span><strong>${executiveFormat(current, kind)}</strong><small class="trend trend--${trend.tone}">${escapeHtml(trend.text)}</small></article>`;
+}
+
+function executiveSvgPath(values, width, height, padding, min, max) {
+  const range = max - min || 1;
+  const lastIndex = Math.max(1, values.length - 1);
+  let path = "";
+  let drawing = false;
+  values.forEach((value, index) => {
+    if (!Number.isFinite(value)) {
+      drawing = false;
+      return;
+    }
+    const x = padding + ((width - padding * 2) * index) / lastIndex;
+    const y = height - padding - ((value - min) / range) * (height - padding * 2);
+    path += `${drawing ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)} `;
+    drawing = true;
+  });
+  return path.trim();
+}
+
+function renderExecutiveChart({ title, caption, rows, series, source, normalise = false }) {
+  const width = 680;
+  const height = 210;
+  const padding = 18;
+  const plotted = series.map((item) => {
+    const values = rows.map((row) => executiveValue(row, item.key));
+    if (!normalise) return { ...item, values };
+    const finite = values.filter((value) => value !== null);
+    const minimum = Math.min(...finite);
+    const range = Math.max(...finite) - minimum || 1;
+    return { ...item, values: values.map((value) => value === null ? null : (value - minimum) / range) };
+  });
+  const values = plotted.flatMap((item) => item.values).filter((value) => value !== null);
+  if (!values.length) return `<article class="executive-panel executive-panel--chart"><div class="executive-panel__heading"><div><p class="eyebrow">${escapeHtml(source)}</p><h3>${escapeHtml(title)}</h3></div></div><p class="executive-empty">There is not enough data in this period to draw this trend.</p></article>`;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const gridLines = [0.15, 0.5, 0.85].map((ratio) => `<line x1="${padding}" x2="${width - padding}" y1="${(height * ratio).toFixed(1)}" y2="${(height * ratio).toFixed(1)}" />`).join("");
+  return `<article class="executive-panel executive-panel--chart"><div class="executive-panel__heading"><div><p class="eyebrow">${escapeHtml(source)}</p><h3>${escapeHtml(title)}</h3></div><div class="executive-legend">${plotted.map((item) => `<span><i style="--series-colour:${item.colour}"></i>${escapeHtml(item.label)}</span>`).join("")}</div></div><svg class="executive-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(title)} trend chart"><g class="executive-chart__grid">${gridLines}</g>${plotted.map((item) => `<path d="${executiveSvgPath(item.values, width, height, padding, min, max)}" style="--series-colour:${item.colour}"></path>`).join("")}</svg><p class="executive-panel__caption">${escapeHtml(caption)}</p></article>`;
+}
+
+function executiveCumulativeSeries(key) {
+  const byYear = new Map();
+  executiveRows().forEach((row) => {
+    const year = row.week.slice(0, 4);
+    if (!byYear.has(year)) byYear.set(year, []);
+    byYear.get(year).push(executiveValue(row, key));
+  });
+  const colours = ["#b89221", "#8cae97", "#8a6558", "#171714"];
+  return [...byYear.entries()].slice(-4).map(([year, values], index, years) => {
+    let total = 0;
+    return { label: year, key: "", colour: colours[colours.length - years.length + index] || "#b89221", values: values.map((value) => { total += value || 0; return total; }) };
+  });
+}
+
+function renderExecutiveCumulativeChart() {
+  const width = 680;
+  const height = 220;
+  const padding = 18;
+  const series = executiveCumulativeSeries("salesEx");
+  const values = series.flatMap((item) => item.values).filter(Number.isFinite);
+  if (!values.length) return "";
+  const min = 0;
+  const max = Math.max(...values);
+  return `<article class="executive-panel executive-panel--wide executive-panel--chart"><div class="executive-panel__heading"><div><p class="eyebrow">ALL SALES</p><h3>Cumulative turnover</h3></div><div class="executive-legend">${series.map((item) => `<span><i style="--series-colour:${item.colour}"></i>${item.label}</span>`).join("")}</div></div><svg class="executive-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Cumulative sales ex VAT by year"><g class="executive-chart__grid"><line x1="${padding}" x2="${width - padding}" y1="${height * .18}" y2="${height * .18}" /><line x1="${padding}" x2="${width - padding}" y1="${height * .5}" y2="${height * .5}" /><line x1="${padding}" x2="${width - padding}" y1="${height * .82}" y2="${height * .82}" /></g>${series.map((item) => `<path d="${executiveSvgPath(item.values, width, height, padding, min, max)}" style="--series-colour:${item.colour}"></path>`).join("")}</svg><p class="executive-panel__caption">Calendar years are overlaid by week, so the current year can be compared with the same stage of each previous year.</p></article>`;
+}
+
+function renderExecutiveDriver({ label, key, kind, rows, comparisonRows, lowerIsBetter = false }) {
+  const current = executiveMetric(rows, key);
+  const previous = executiveMetric(comparisonRows, key);
+  const trend = executiveTrend(current, previous, { lowerIsBetter });
+  return `<article class="executive-driver"><span>${escapeHtml(label)}</span><strong>${executiveFormat(current, kind)}</strong><small class="trend trend--${trend.tone}">${escapeHtml(trend.text)}</small></article>`;
+}
+
+function renderExecutiveDashboard() {
+  const allRows = executiveRows();
+  if (!allRows.length) return `<section class="executive-page"><button class="back-link" type="button" data-section="hub">&larr; Information Hub</button><div class="page-intro"><p class="eyebrow">EXECUTIVE DASHBOARD</p><h2>Business trajectory</h2><p>Upload the full Master Performance Sheet to prepare the long-term dashboard.</p></div></section>`;
+  const years = executiveYears();
+  const weeks = executivePeriodWeeks();
+  const rows = executiveRowsForWeeks(weeks);
+  const comparisonRows = executiveComparableRows(weeks);
+  const latestThirteen = executiveRows().slice(-13);
+  const priorThirteen = executiveRows().slice(-26, -13);
+  const forwardSalesTrend = executiveTrend(executiveMetric(latestThirteen, "salesEx", "sum"), executiveMetric(priorThirteen, "salesEx", "sum"), { label: "previous 13 weeks" });
+  const forwardWageTrend = executiveTrend(executiveMetric(latestThirteen, "totalWagePercent"), executiveMetric(priorThirteen, "totalWagePercent"), { lowerIsBetter: true, label: "previous 13 weeks" });
+  return `<section class="executive-page">
+    <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
+    <div class="executive-hero"><p class="eyebrow">LARDER EXECUTIVE DASHBOARD</p><h2>Business trajectory</h2><p>See how volume, value, margin and labour have moved together—and which indicators are shaping the next few months.</p><img class="executive-hero__logo" src="./assets/larder-logo.png" alt="Larder Brasserie and Grill" /></div>
+    <section class="executive-controls" aria-label="Executive dashboard period"><label>Reporting period<select data-action="executive-period"><option value="latest-13" ${(state.executivePeriod || defaultExecutivePeriod()) === "latest-13" ? "selected" : ""}>Latest 13 weeks</option><option value="all" ${(state.executivePeriod || defaultExecutivePeriod()) === "all" ? "selected" : ""}>All available data</option>${years.map((year) => `<option value="${year}" ${(state.executivePeriod || defaultExecutivePeriod()) === year ? "selected" : ""}>${year} to date</option>`).join("")}</select></label><p><strong>${escapeHtml(executivePeriodTitle())}</strong><span>${rows.length} reporting weeks · sourced from the full Master Performance Sheet</span></p></section>
+    <section class="executive-kpis" aria-label="Executive key performance indicators">
+      ${renderExecutiveKpi({ label: "Sales ex VAT", key: "salesEx", kind: "currency", aggregate: "sum", rows, comparisonRows })}
+      ${renderExecutiveKpi({ label: "Total covers", key: "covers", kind: "number", aggregate: "sum", rows, comparisonRows })}
+      ${renderExecutiveKpi({ label: "Average spend per head", key: "spendPerHead", kind: "currency", rows, comparisonRows })}
+      ${renderExecutiveKpi({ label: "Overall GP", key: "overallGpPercent", kind: "percentage", rows, comparisonRows })}
+      ${renderExecutiveKpi({ label: "Total wages as % of sales", key: "totalWagePercent", kind: "percentage", lowerIsBetter: true, rows, comparisonRows })}
+      ${renderExecutiveKpi({ label: "Average future bookings", key: "futureBookings", kind: "currency", rows, comparisonRows })}
+    </section>
+    <section class="executive-dashboard-grid">
+      ${renderExecutiveCumulativeChart()}
+      ${renderExecutiveChart({ title: "Covers and spend per head", caption: "Higher cover numbers are strongest when spend per head is stable or improving. Each series is scaled to its own range so both movements remain readable.", rows, source: "COVERS SUMMARY · SPH", normalise: true, series: [{ label: "Covers", key: "covers", colour: "#315640" }, { label: "Spend per head", key: "spendPerHead", colour: "#b89221" }] })}
+      ${renderExecutiveChart({ title: "Margin and labour", caption: "Overall GP and total wage ratio are tracked together because growth only adds value when both move in the right direction.", rows, source: "GP OVERALL · WAGES", series: [{ label: "Overall GP", key: "overallGpPercent", colour: "#315640" }, { label: "Total wages", key: "totalWagePercent", colour: "#a84141" }] })}
+    </section>
+    <section class="executive-outlook"><div><p class="eyebrow">WHERE THE BUSINESS IS GOING</p><h3>Latest 13-week run rate</h3><p>This is a directional view, using the most recent 13 completed weeks rather than a forecast promise.</p></div><div class="executive-outlook__items"><article class="executive-outlook__item executive-outlook__item--${forwardSalesTrend.tone}"><span>Sales ex VAT</span><strong>${executiveFormat(executiveMetric(latestThirteen, "salesEx", "sum"), "currency")}</strong><small>${escapeHtml(forwardSalesTrend.text)}</small></article><article class="executive-outlook__item executive-outlook__item--${forwardWageTrend.tone}"><span>Wage ratio</span><strong>${executiveFormat(executiveMetric(latestThirteen, "totalWagePercent"), "percentage")}</strong><small>${escapeHtml(forwardWageTrend.text)}</small></article><article class="executive-outlook__item"><span>Future bookings</span><strong>${executiveFormat(executiveMetric(latestThirteen, "futureBookings", "sum"), "currency")}</strong><small>Across the latest 13 weeks</small></article></div></section>
+    <section class="executive-drivers"><div class="section-label"><span></span>Key margin and cost drivers</div><div class="executive-drivers__grid">${renderExecutiveDriver({ label: "Food GP (adjusted)", key: "adjustedFoodGpPercent", kind: "percentage", rows, comparisonRows })}${renderExecutiveDriver({ label: "Drink GP (adjusted)", key: "adjustedDrinkGpPercent", kind: "percentage", rows, comparisonRows })}${renderExecutiveDriver({ label: "Senior management wages", key: "seniorManagementWagePercent", kind: "percentage", rows, comparisonRows, lowerIsBetter: true })}${renderExecutiveDriver({ label: "Comps as % of sales", key: "compsPercentSales", kind: "percentage", rows, comparisonRows, lowerIsBetter: true })}${renderExecutiveDriver({ label: "Discounts as % of sales", key: "discountPercentSales", kind: "percentage", rows, comparisonRows, lowerIsBetter: true })}${renderExecutiveDriver({ label: "Operating expenses", key: "expenses", kind: "currency", rows, comparisonRows, lowerIsBetter: true })}</div></section>
+    <section class="executive-note"><strong>Data note</strong><span>Discounts, functions, shoots, utilities and some expense measures have shorter or intermittent history in this workbook. They are retained as contextual indicators; the core trajectory is based on weekly sales, covers, spend per head, GP and wages.</span></section>
   </section>`;
 }
 
@@ -693,6 +892,7 @@ function renderMenu() {
   const menuItems = [
     `<button class="menu-item ${state.section === "hub" ? "is-active" : ""}" data-section="hub"><span class="menu-item__icon">⌂</span><span>Information Hub</span><span class="menu-item__chevron">›</span></button>`,
     `<button class="menu-item ${state.section === "overview" ? "is-active" : ""}" data-section="overview"><span class="menu-item__icon">▦</span><span>Weekly reports</span><span class="menu-item__chevron">›</span></button>`,
+    ...(canViewExecutiveDashboard() ? [`<button class="menu-item menu-item--executive ${state.section === "executive" ? "is-active" : ""}" data-section="executive"><span class="menu-item__icon">↗</span><span>Executive dashboard</span><span class="menu-item__chevron">›</span></button>`] : []),
     ...(canManageUsers() && !state.previewUser ? [
       `<button class="menu-item ${state.section === "users" ? "is-active" : ""}" data-section="users"><span class="menu-item__icon">♙</span><span>Users</span><span class="menu-item__chevron">›</span></button>`,
       `<button class="menu-item menu-item--admin ${state.section === "admin" ? "is-active" : ""}" data-section="admin"><span class="menu-item__icon">⚙</span><span>Report viewing permissions</span><span class="menu-item__chevron">›</span></button>`,
@@ -897,7 +1097,7 @@ function render() {
   }
   topWeek.textContent = report ? formatDate(state.week || report.selectedWeek, true).replace(/&mdash;/g, "—") : "No report yet";
   renderMenu();
-  const page = state.section === "hub" ? renderHub() : state.section === "tasks" ? renderTasks() : state.section === "set-task" ? renderSetTask() : state.section === "users" ? renderUsers() : state.section === "activity" ? renderActivity() : state.section === "admin" ? (state.menuMode === "tasks" ? renderTaskAdmin() : renderAdmin()) : !report ? renderNoReport() : state.section === "overview" ? renderOverview() : state.section === "update-report" ? renderUpdateReport() : renderSection(getSection(state.section));
+  const page = state.section === "hub" ? renderHub() : state.section === "tasks" ? renderTasks() : state.section === "set-task" ? renderSetTask() : state.section === "users" ? renderUsers() : state.section === "activity" ? renderActivity() : state.section === "executive" ? renderExecutiveDashboard() : state.section === "admin" ? (state.menuMode === "tasks" ? renderTaskAdmin() : renderAdmin()) : !report ? renderNoReport() : state.section === "overview" ? renderOverview() : state.section === "update-report" ? renderUpdateReport() : renderSection(getSection(state.section));
   app.innerHTML = `${renderPreviewBanner()}${page}`;
   attachDynamicListeners();
   if ((state.section === "admin" || state.section === "users" || state.section === "activity") && state.adminUsers === null) void loadAdminUsers();
@@ -925,6 +1125,7 @@ function changeSection(section) {
     || (section === "set-task" && Boolean(state.taskData?.canCreate))
     || (section === "users" && canManageUsers() && !state.previewUser)
     || (section === "activity" && canManageUsers() && !state.previewUser)
+    || (section === "executive" && canViewExecutiveDashboard())
     || section === "overview"
     || (section === "update-report" && canPublishReport() && !state.previewUser)
     || (section === "admin" && canManageUsers() && !state.previewUser)
@@ -969,6 +1170,7 @@ function recordSectionActivity(section) {
   if (section === "tasks" || section === "set-task") return recordActivity("tasks");
   if (section === "users") return recordActivity("users");
   if (section === "activity") return recordActivity("user-activity");
+  if (section === "executive") return recordActivity("executive-dashboard");
   if (section === "admin") return recordActivity("report-permissions");
   if (section === "update-report") return recordActivity("report-update");
   if (section === "overview") return recordActivity("report-overview", formatDate(report?.selectedWeek || state.week));
@@ -1421,7 +1623,7 @@ async function signOut() {
   localPreviewModel = null;
   sharedReportVersion = "";
   lastActivityKey = "";
-  state = { section: "hub", week: "", sourceName: "", isUploaded: false, authMode: "login", authMessage: "You have signed out.", authToken: "", user: null, access: null, adminUsers: null, adminMessage: "", availableWeeks: [], taskData: null, taskMessage: "", menuMode: "report" };
+  state = { section: "hub", week: "", sourceName: "", isUploaded: false, authMode: "login", authMessage: "You have signed out.", authToken: "", user: null, access: null, adminUsers: null, adminMessage: "", availableWeeks: [], taskData: null, taskMessage: "", menuMode: "report", executive: null, executivePeriod: "" };
   updateTaskBadge(0);
   render();
 }
@@ -1484,6 +1686,10 @@ function attachDynamicListeners() {
     render();
   }));
   document.querySelectorAll("[data-action='choose-calendar-week']").forEach((button) => button.addEventListener("click", () => { void changeReportWeek(button.dataset.week); }));
+  document.querySelectorAll("[data-action='executive-period']").forEach((select) => select.addEventListener("change", () => {
+    state = { ...state, executivePeriod: select.value };
+    render();
+  }));
   document.querySelectorAll("select[name='dateScope']").forEach((select) => select.addEventListener("change", () => {
     const range = select.closest(".permission-area")?.querySelector(".permission-date-range");
     if (range) range.hidden = select.value !== "range";
@@ -1600,6 +1806,9 @@ function applySharedReport(payload, { renderAfterLoad = false, preview = false }
   report = withOverviewTones(payload.report);
   const activeSection = state.section;
   const sectionIsAvailable = activeSection === "overview"
+    || (activeSection === "users" && nextAccess?.canManageUsers && !previewing)
+    || (activeSection === "activity" && nextAccess?.canManageUsers && !previewing)
+    || (activeSection === "executive" && nextAccess?.canManageUsers && !previewing)
     || (activeSection === "update-report" && nextAccess?.canPublish && !previewing)
     || (activeSection === "admin" && nextAccess?.canManageUsers && !previewing)
     || report.sections.some((section) => section.id === activeSection);
@@ -1611,6 +1820,8 @@ function applySharedReport(payload, { renderAfterLoad = false, preview = false }
     isUploaded: false,
     access: nextAccess,
     availableWeeks: Array.isArray(payload.availableWeeks) && payload.availableWeeks.length ? payload.availableWeeks : [report.selectedWeek],
+    executive: payload.executive || null,
+    executivePeriod: payload.executive?.currentWeek?.slice(0, 4) || "",
     calendarOpen: false,
     calendarMonth: monthKey(report.selectedWeek),
     previewUser: previewing ? payload.preview : null,
@@ -1727,7 +1938,7 @@ async function handleUpload(files) {
       localPreviewModel = model;
       localPreviewSource = withOverviewTones(nextReport);
       report = localPreviewSource;
-      state = { ...state, section: "overview", week: report.selectedWeek, sourceName: file.name, availableWeeks: model?.availableWeeks || [report.selectedWeek], calendarOpen: false, calendarMonth: monthKey(report.selectedWeek), adminMessage: "Master workbook loaded for local preview only." };
+      state = { ...state, section: "overview", week: report.selectedWeek, sourceName: file.name, availableWeeks: model?.availableWeeks || [report.selectedWeek], executive: model?.executive || null, executivePeriod: model?.executive?.currentWeek?.slice(0, 4) || "", calendarOpen: false, calendarMonth: monthKey(report.selectedWeek), adminMessage: "Master workbook loaded for local preview only." };
       render();
       setUploadStatus("Master workbook loaded locally. It has not been published.", "is-success");
       return;
@@ -2045,6 +2256,57 @@ function sourceDataForMaster(workbook, definitions, currentWeek) {
   return sources;
 }
 
+function executiveDataFromWorkbook(workbook, currentWeek) {
+  const rows = {};
+  const salesWeeks = new Set();
+  const addSheet = (sheetName, dateColumn, fields, { salesAnchor = false } = {}) => {
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet?.["!ref"]) return;
+    const range = window.XLSX.utils.decode_range(sheet["!ref"]);
+    for (let row = range.s.r + 1; row <= range.e.r; row += 1) {
+      const week = dateFromExcel(cellValue(sheet, row, dateColumn));
+      if (!week || week > currentWeek) continue;
+      const values = Object.fromEntries(Object.entries(fields).map(([key, column]) => {
+        const value = cellValue(sheet, row, column);
+        return [key, typeof value === "number" && Number.isFinite(value) ? value : null];
+      }));
+      if (salesAnchor && Number(values.salesEx) > 1000) salesWeeks.add(week);
+      if (!Object.values(values).some((value) => value !== null)) continue;
+      rows[week] = { ...(rows[week] || {}), ...Object.fromEntries(Object.entries(values).filter(([, value]) => value !== null)) };
+    }
+  };
+
+  addSheet("All Sales", 8, { salesInc: 42, salesEx: 43, foodSalesInc: 17, drinkSalesInc: 29 }, { salesAnchor: true });
+  addSheet("Covers Summary", 2, { covers: 70 });
+  addSheet("SPH", 0, { spendPerHead: 15 });
+  addSheet("Function Info", 2, { functionSalesEx: 15, functionSalesInc: 16, functionFoodCovers: 18, functionSpendPerHead: 22 });
+  addSheet("GP Overall", 0, { overallGpPounds: 4, overallGpPercent: 5 });
+  addSheet("GP Food and Drink", 6, { foodGpPounds: 9, foodGpPercent: 10 });
+  addSheet("GP Food and Drink", 21, { drinkGpPounds: 24, drinkGpPercent: 25 });
+  addSheet("GP Food and Drink Adjusted", 0, { adjustedFoodGpPounds: 8, adjustedFoodGpPercent: 9 });
+  addSheet("GP Food and Drink Adjusted", 20, { adjustedDrinkGpPounds: 28, adjustedDrinkGpPercent: 29 });
+  addSheet("Wages", 69, { totalWages: 79, totalWagePercent: 80 });
+  addSheet("Wages", 1, { fohWages: 7, fohWagePercent: 8 });
+  addSheet("Wages", 18, { chefWages: 24, chefWagePercent: 25 });
+  addSheet("Wages", 35, { cleanerWages: 41, cleanerWagePercent: 42 });
+  addSheet("Wages", 52, { seniorManagementWages: 58, seniorManagementWagePercent: 59 });
+  addSheet("Comps", 8, { comps: 52, compsPercentSales: 53, compsGpImpact: 61 });
+  addSheet("Discounts", 36, { discounts: 37, discountPercentSales: 49 });
+  addSheet("Shoots Breakdown", 2, { shoots: 3, shootRevenue: 9, shootMaterialCost: 15, shootGpPounds: 17, shootLabourCost: 23, shootGpImpact: 33 });
+  addSheet("Expenses", 6, { expenses: 11 });
+  addSheet("Future Bookings", 6, { futureBookings: 7 });
+  addSheet("Utilities", 8, { electricUsage: 10, gasUsage: 14 });
+
+  const weeks = [...salesWeeks].sort();
+  if (!weeks.length) return null;
+  return {
+    version: 1,
+    currentWeek,
+    weeks,
+    rows: Object.fromEntries(weeks.map((week) => [week, rows[week] || {}])),
+  };
+}
+
 function masterReportModelFromWorkbook(workbook, reportSheet) {
   const currentWeek = dateFromExcel(cellValue(reportSheet, 1, 13));
   if (!currentWeek) throw new Error("I could not find the selected week-ending date in Generate Report.");
@@ -2073,6 +2335,7 @@ function masterReportModelFromWorkbook(workbook, reportSheet) {
     })),
     sections: sections.map(({ configRow, titleRow, groupRow, headerRow, columns, ...section }) => section),
     sources,
+    executive: executiveDataFromWorkbook(workbook, currentWeek),
   };
 }
 
@@ -2245,9 +2508,13 @@ async function initialiseApplication() {
 
 async function loadLocalPermissionsPreview() {
   try {
-    const response = await fetch("./data/report-data.json", { cache: "no-store" });
+    const [response, executiveResponse] = await Promise.all([
+      fetch("./data/report-data.json", { cache: "no-store" }),
+      fetch("./data/executive-dashboard.json", { cache: "no-store" }),
+    ]);
     if (!response.ok) throw new Error("The local sample report could not be loaded.");
     localPreviewSource = withOverviewTones(await response.json());
+    const localExecutive = executiveResponse.ok ? await executiveResponse.json() : null;
     report = localPreviewSource;
     const viewerView = defaultAccessView(["sales", "covers", "wages"]);
     viewerView.overview.cards = ["sales-inc", "covers", "wages"];
@@ -2272,6 +2539,8 @@ async function loadLocalPermissionsPreview() {
       authMode: "authenticated",
       user: { id: "preview-admin", email: "admin@example.com", name: "Admin preview" },
       access: { enabled: true, role: "admin", sections: report.sections.map((section) => section.id), dateAccess: { scope: "all" }, canManageUsers: true, canPublish: true },
+      executive: localExecutive,
+      executivePeriod: localExecutive?.currentWeek?.slice(0, 4) || "",
       adminUsers: [
         { id: "preview-admin", name: "Admin preview", email: "admin@example.com", role: "admin", enabled: true, sections: report.sections.map((section) => section.id), view: null, dateAccess: { scope: "all" }, taskAccess: { canCreate: true, assigneeIds: ["*"] }, activity: { appViews: 18, lastViewedAt: new Date().toISOString(), recentViews: [{ label: "Weekly reports · 19 July 2026", at: new Date().toISOString() }, { label: "My tasks", at: new Date(Date.now() - 86_400_000).toISOString() }] }, isInitialAdmin: true },
         { id: "preview-viewer", name: "Jordan Viewer", email: "jordan@example.com", role: "viewer", enabled: true, sections: ["sales", "covers", "wages"], view: viewerView, dateAccess: { scope: "current" }, taskAccess: { canCreate: true, assigneeIds: ["preview-admin"] }, activity: { appViews: 7, lastViewedAt: new Date(Date.now() - 7_200_000).toISOString(), recentViews: [{ label: "Report section · Sales · 19 July 2026", at: new Date(Date.now() - 7_200_000).toISOString() }, { label: "Weekly reports · 19 July 2026", at: new Date(Date.now() - 7_300_000).toISOString() }] }, isInitialAdmin: false },

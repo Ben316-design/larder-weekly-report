@@ -15,6 +15,8 @@ const menuButton = document.querySelector("#menu-button");
 const closeMenuButton = document.querySelector("#close-menu");
 const drawer = document.querySelector("#menu-drawer");
 const drawerBackdrop = document.querySelector("#drawer-backdrop");
+const drawerKicker = document.querySelector("#drawer-kicker");
+const drawerTitle = document.querySelector("#drawer-title");
 const topWeek = document.querySelector("#top-week");
 const weekButton = document.querySelector("#week-button");
 const uploadInput = document.querySelector("#weekly-report-input");
@@ -458,7 +460,7 @@ function renderTaskCreator({ page = false } = {}) {
 
 function renderSetTask() {
   return `<section class="tasks-page">
-    <button class="back-link" type="button" data-section="tasks">&larr; My tasks</button>
+    <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
     <div class="page-intro"><p class="eyebrow">LARDER INFORMATION HUB</p><h2>Set a task</h2><p>Assign a task, choose its reminders, and decide whether it repeats.</p></div>
     ${renderTaskCreator({ page: true })}
   </section>`;
@@ -787,7 +789,7 @@ function renderTaskAccessEditor(savedAccess = null, excludeUserId = "") {
 function renderAdmin() {
   const users = state.adminUsers;
   return `<section class="admin-page">
-    <button class="back-link" type="button" data-section="overview">&larr; Weekly reports</button>
+    <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
     <div class="page-intro"><p class="eyebrow">WEEKLY REPORTS</p><h2>Report viewing permissions</h2><p>Choose the report-ending dates, overview cards, sections, headings, and figures each Viewer can see. Account setup and activity are managed in Users.</p></div>
     ${renderSensitiveAccessCheck()}
     <section class="admin-people"><div class="section-label"><span></span>People and report access</div>${users === null ? '<p class="admin-loading">Loading people…</p>' : users.map(renderReportAccessUser).join("")}</section>
@@ -828,7 +830,7 @@ function renderUsers() {
 function renderActivity() {
   const users = state.adminUsers;
   return `<section class="admin-page activity-page">
-    <button class="back-link" type="button" data-section="users">&larr; Users</button>
+    <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
     <div class="page-intro"><p class="eyebrow">ACCOUNT ACTIVITY</p><h2>Recent activity</h2><p>See how often each person has opened the Information Hub and the most recent areas they have viewed.</p></div>
     <section class="admin-people"><div class="section-label"><span></span>Activity by account</div>${users === null ? '<p class="admin-loading">Loading account activity…</p>' : users.map((person) => `<article class="admin-user-card activity-user-card"><div><strong>${escapeHtml(person.name || person.email)}</strong><span>${escapeHtml(person.email)} · ${escapeHtml(person.role)}</span></div>${renderUserActivity(person)}</article>`).join("")}</section>
   </section>`;
@@ -837,7 +839,7 @@ function renderActivity() {
 function renderTaskAdmin() {
   const users = state.adminUsers;
   return `<section class="admin-page task-admin-page">
-    <button class="back-link" type="button" data-section="tasks">&larr; My tasks</button>
+    <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
     <div class="page-intro"><p class="eyebrow">TASK ADMIN CONTROL CENTRE</p><h2>Task permissions</h2><p>Choose who can set tasks and exactly who they are allowed to assign tasks to. Admins and Owners always have full task access.</p></div>
     ${renderSensitiveAccessCheck()}
     <section class="admin-people"><div class="section-label"><span></span>People and task access</div>${users === null ? '<p class="admin-loading">Loading people…</p>' : users.map((person) => {
@@ -861,9 +863,21 @@ function renderUserAccount(person, isAdmin) {
   return `<form class="admin-user-card user-account-card" data-account-form="update"><input type="hidden" name="userId" value="${escapeHtml(person.id)}"><div class="admin-user-card__identity"><label>Name<input name="name" value="${escapeHtml(person.name || "")}" autocomplete="name"></label><span>${escapeHtml(person.email)}</span></div><div class="admin-user-card__controls"><label>Role<select name="role"><option value="viewer" ${!owner ? "selected" : ""}>Viewer</option>${isAdmin ? `<option value="owner" ${owner ? "selected" : ""}>Owner</option>` : ""}</select></label><label class="admin-toggle"><input name="enabled" type="checkbox" ${person.enabled ? "checked" : ""}><span>Can sign in</span></label></div>${activity}<div class="admin-user-card__actions"><button type="submit">Save account</button></div></form>`;
 }
 
+function setDrawerHeading(kicker, title) {
+  drawerKicker.textContent = kicker;
+  drawerTitle.textContent = title;
+  drawer.setAttribute("aria-label", `${title} menu`);
+}
+
+function renderDrawerFooter() {
+  const footer = document.querySelector(".drawer-footer");
+  if (footer) footer.innerHTML = `<span>${escapeHtml(state.user?.email || "")}</span><button type="button" data-action="sign-out">Sign out</button>`;
+}
+
 function renderMenu() {
   const inTaskArea = state.menuMode === "tasks";
   if (inTaskArea) {
+    setDrawerHeading("TASKS MENU", "My tasks");
     const taskMenuItems = [
       `<button class="menu-item" data-section="hub"><span class="menu-item__icon">⌂</span><span>Information Hub</span><span class="menu-item__chevron">›</span></button>`,
       `<button class="menu-item ${state.section === "tasks" ? "is-active" : ""}" data-section="tasks"><span class="menu-item__icon">✓</span><span>My tasks${state.taskData?.outstandingCount ? ` <b class="menu-item__badge">${state.taskData.outstandingCount}</b>` : ""}</span><span class="menu-item__chevron">›</span></button>`,
@@ -873,39 +887,69 @@ function renderMenu() {
       taskMenuItems.push(`<button class="menu-item menu-item--admin ${state.section === "admin" ? "is-active" : ""}" data-section="admin"><span class="menu-item__icon">⚙</span><span>Admin control centre</span><span class="menu-item__chevron">›</span></button>`);
     }
     sectionMenu.innerHTML = taskMenuItems.join("");
-    const taskFooter = document.querySelector(".drawer-footer");
-    if (taskFooter) taskFooter.innerHTML = `<span>${escapeHtml(state.user?.email || "")}</span><button type="button" data-action="sign-out">Sign out</button>`;
+    renderDrawerFooter();
     return;
   }
   const inUserArea = state.menuMode === "users";
   if (inUserArea) {
+    setDrawerHeading("USERS MENU", "Account management");
     const userMenuItems = [
       `<button class="menu-item" data-section="hub"><span class="menu-item__icon">⌂</span><span>Information Hub</span><span class="menu-item__chevron">›</span></button>`,
       `<button class="menu-item ${state.section === "users" ? "is-active" : ""}" data-section="users"><span class="menu-item__icon">♙</span><span>Users</span><span class="menu-item__chevron">›</span></button>`,
       `<button class="menu-item ${state.section === "activity" ? "is-active" : ""}" data-section="activity"><span class="menu-item__icon">◷</span><span>Recent activity</span><span class="menu-item__chevron">›</span></button>`,
     ];
     sectionMenu.innerHTML = userMenuItems.join("");
-    const userFooter = document.querySelector(".drawer-footer");
-    if (userFooter) userFooter.innerHTML = `<span>${escapeHtml(state.user?.email || "")}</span><button type="button" data-action="sign-out">Sign out</button>`;
+    renderDrawerFooter();
     return;
   }
+  if (state.section === "executive") {
+    setDrawerHeading("EXECUTIVE MENU", "Business trajectory");
+    sectionMenu.innerHTML = [
+      `<button class="menu-item" data-section="hub"><span class="menu-item__icon">⌂</span><span>Information Hub</span><span class="menu-item__chevron">›</span></button>`,
+      `<button class="menu-item menu-item--executive is-active" data-section="executive"><span class="menu-item__icon">↗</span><span>Executive dashboard</span><span class="menu-item__chevron">›</span></button>`,
+    ].join("");
+    renderDrawerFooter();
+    return;
+  }
+  if (state.section === "hub") {
+    setDrawerHeading("HUB MENU", "Information Hub");
+    sectionMenu.innerHTML = [
+      `<button class="menu-item is-active" data-section="hub"><span class="menu-item__icon">⌂</span><span>Information Hub</span><span class="menu-item__chevron">›</span></button>`,
+      `<button class="menu-item" data-section="overview"><span class="menu-item__icon">▦</span><span>Weekly reports</span><span class="menu-item__chevron">›</span></button>`,
+      `<button class="menu-item" data-section="tasks"><span class="menu-item__icon">✓</span><span>My tasks${state.taskData?.outstandingCount ? ` <b class="menu-item__badge">${state.taskData.outstandingCount}</b>` : ""}</span><span class="menu-item__chevron">›</span></button>`,
+      ...(canManageUsers() && !state.previewUser ? [`<button class="menu-item" data-section="users"><span class="menu-item__icon">♙</span><span>Users</span><span class="menu-item__chevron">›</span></button>`] : []),
+      ...(canViewExecutiveDashboard() ? [`<button class="menu-item menu-item--executive" data-section="executive"><span class="menu-item__icon">↗</span><span>Executive dashboard</span><span class="menu-item__chevron">›</span></button>`] : []),
+    ].join("");
+    renderDrawerFooter();
+    return;
+  }
+  if (state.section === "admin" || state.section === "update-report") {
+    const isUpdatePage = state.section === "update-report";
+    setDrawerHeading("WEEKLY REPORTS", isUpdatePage ? "Update report" : "Report permissions");
+    sectionMenu.innerHTML = [
+      `<button class="menu-item" data-section="hub"><span class="menu-item__icon">⌂</span><span>Information Hub</span><span class="menu-item__chevron">›</span></button>`,
+      `<button class="menu-item" data-section="overview"><span class="menu-item__icon">▦</span><span>Weekly reports</span><span class="menu-item__chevron">›</span></button>`,
+      isUpdatePage
+        ? `<button class="menu-item menu-item--update is-active" data-section="update-report"><span class="menu-item__icon">↥</span><span>Update report</span><span class="menu-item__chevron">›</span></button>`
+        : `<button class="menu-item menu-item--admin is-active" data-section="admin"><span class="menu-item__icon">⚙</span><span>Report viewing permissions</span><span class="menu-item__chevron">›</span></button>`,
+    ].join("");
+    renderDrawerFooter();
+    return;
+  }
+  setDrawerHeading("REPORT MENU", "Weekly reports");
+  const isReportLanding = state.section === "overview";
   const menuItems = [
     `<button class="menu-item ${state.section === "hub" ? "is-active" : ""}" data-section="hub"><span class="menu-item__icon">⌂</span><span>Information Hub</span><span class="menu-item__chevron">›</span></button>`,
     `<button class="menu-item ${state.section === "overview" ? "is-active" : ""}" data-section="overview"><span class="menu-item__icon">▦</span><span>Weekly reports</span><span class="menu-item__chevron">›</span></button>`,
-    ...(canViewExecutiveDashboard() ? [`<button class="menu-item menu-item--executive ${state.section === "executive" ? "is-active" : ""}" data-section="executive"><span class="menu-item__icon">↗</span><span>Executive dashboard</span><span class="menu-item__chevron">›</span></button>`] : []),
-    ...(canManageUsers() && !state.previewUser ? [
-      `<button class="menu-item ${state.section === "users" ? "is-active" : ""}" data-section="users"><span class="menu-item__icon">♙</span><span>Users</span><span class="menu-item__chevron">›</span></button>`,
-      `<button class="menu-item menu-item--admin ${state.section === "admin" ? "is-active" : ""}" data-section="admin"><span class="menu-item__icon">⚙</span><span>Report viewing permissions</span><span class="menu-item__chevron">›</span></button>`,
-    ] : []),
-    ...(canPublishReport() && !state.previewUser ? [`<button class="menu-item menu-item--update ${state.section === "update-report" ? "is-active" : ""}" data-section="update-report"><span class="menu-item__icon">↥</span><span>Update report</span><span class="menu-item__chevron">›</span></button>`] : []),
+    ...(isReportLanding && canManageUsers() && !state.previewUser ? [`<button class="menu-item menu-item--admin" data-section="admin"><span class="menu-item__icon">⚙</span><span>Report viewing permissions</span><span class="menu-item__chevron">›</span></button>`] : []),
+    ...(isReportLanding && canPublishReport() && !state.previewUser ? [`<button class="menu-item menu-item--update" data-section="update-report"><span class="menu-item__icon">↥</span><span>Update report</span><span class="menu-item__chevron">›</span></button>`] : []),
     ...(report?.sections || []).map((section) => `<button class="menu-item ${state.section === section.id ? "is-active" : ""}" data-section="${section.id}">
       <span class="menu-item__icon accent-${section.accent}">${sectionIcon(section)}</span>
       <span>${escapeHtml(section.label)}</span><span class="menu-item__chevron">›</span>
     </button>`),
   ];
   sectionMenu.innerHTML = menuItems.join("");
-  const footer = document.querySelector(".drawer-footer");
-  if (footer) footer.innerHTML = `<span>${escapeHtml(state.user?.email || "")}</span><button type="button" data-action="sign-out">Sign out</button>`;
+  renderDrawerFooter();
 }
 
 function renderUploader() {
@@ -987,6 +1031,7 @@ function renderOverview() {
       </button>`).join("")}
     </section>` : `<section class="error-state"><p class="eyebrow">NO SECTIONS SELECTED</p><h2>Ask an Admin or Owner to choose the report sections for this account.</h2></section>`;
   return `
+    <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
     <section class="page-intro overview-intro">
       <p class="eyebrow">WEEKLY REPORTS</p>
       <h2>At a glance</h2>
@@ -1005,7 +1050,7 @@ function renderOverview() {
 function renderUpdateReport() {
   return `
     <section class="update-report-page">
-      <button class="back-link" type="button" data-section="overview">&larr; Overview</button>
+      <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
       <div class="page-intro update-report-intro">
         <p class="eyebrow">WEEKLY REPORT</p>
         <h2>Update report</h2>
@@ -1034,7 +1079,7 @@ function renderSection(section) {
   if (!row) return `<section class="error-state"><p class="eyebrow">NO DATA</p><h2>This report does not include ${escapeHtml(section.label)}.</h2></section>`;
   return `
     <section class="section-hero accent-${section.accent}">
-      <button class="back-link" type="button" data-section="overview">&larr; Overview</button>
+      <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
       <div class="section-hero__title"><span class="section-hero__icon">${sectionIcon(section)}</span><div>
         <p class="eyebrow">DETAILED REPORT</p><h2>${escapeHtml(section.title)}</h2>
       </div></div>

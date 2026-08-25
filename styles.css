@@ -18,7 +18,7 @@
 }
 
 * { box-sizing: border-box; }
-html { background: var(--paper); }
+html { background: var(--paper); -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body { margin: 0; min-width: 320px; background: var(--paper); }
 body.table-expanded { overflow: hidden; overscroll-behavior: none; }
 button, select { font: inherit; }
@@ -184,4 +184,5 @@ main { width: min(100%, 1120px); }
 .executive-drivers { display: grid; gap: 10px; }.executive-drivers__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }.executive-driver { display: grid; gap: 5px; min-height: 106px; padding: 13px; border: 1px solid #e2d9c5; border-radius: 9px; background: #fbf9f3; }.executive-driver > span { color: #706756; font-size: .68rem; font-weight: 800; line-height: 1.2; }.executive-driver strong { color: #252016; font-size: 1.2rem; letter-spacing: -.04em; }.executive-driver small { margin-top: auto; font-size: .62rem; line-height: 1.25; }.executive-note { display: flex; align-items: flex-start; gap: 9px; padding: 13px; border-left: 4px solid #a34b40; border-radius: 8px; color: #615947; background: #f9eae6; font-size: .7rem; line-height: 1.4; }.executive-note strong { flex: 0 0 auto; color: #5e2a24; }
 
 @media (min-width: 700px) { .executive-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }.executive-dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.executive-panel--wide { grid-column: 1 / -1; }.executive-outlook { grid-template-columns: minmax(180px, .7fr) 1.3fr; align-items: center; }.executive-drivers__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 600px) { input:not([type="checkbox"]):not([type="radio"]), select, textarea { font-size: 16px !important; } }
 @media (max-width: 480px) { .brand__logo { width: 66px; height: 44px; }.brand__hub-name { margin-left: 4px; padding-left: 6px; }.executive-controls select { min-width: 0; width: 100%; }.executive-outlook__items { grid-template-columns: 1fr; }.executive-hero h2 { max-width: calc(100% - 90px); font-size: 2.5rem; }.executive-hero__logo { right: 10px; width: 102px; opacity: .82; }.executive-note { display: grid; } }

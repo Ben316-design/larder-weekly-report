@@ -587,7 +587,7 @@ function executiveTrend(current, previous, { lowerIsBetter = false, label = "sam
   const direction = change > 0 ? "Up" : change < 0 ? "Down" : "Unchanged";
   const good = change === 0 || (lowerIsBetter ? change < 0 : change > 0);
   const amount = mode === "points"
-    ? `${(Math.abs(change) * 100).toLocaleString("en-GB", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} percentage points`
+    ? `${(Math.abs(change) * 100).toLocaleString("en-GB", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
     : mode === "value"
       ? executiveFormat(Math.abs(change), kind)
       : Math.abs(change).toLocaleString("en-GB", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 });

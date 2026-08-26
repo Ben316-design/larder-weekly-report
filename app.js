@@ -370,6 +370,17 @@ function userFirstName() {
   return plainText(state.user?.email).split("@")[0] || "there";
 }
 
+function renderOutstandingTaskAlert(count, className) {
+  const total = Math.max(0, Math.floor(Number(count) || 0));
+  if (!total) return "";
+  return `<span class="${className}" role="status" aria-label="${total} outstanding ${total === 1 ? "task" : "tasks"}"><b>${total}</b><i aria-hidden="true">!</i></span>`;
+}
+
+function renderTaskMenuItem(active = false) {
+  const outstanding = Number(state.taskData?.outstandingCount || 0);
+  return `<button class="menu-item menu-item--tasks ${active ? "is-active" : ""}" data-section="tasks"><span class="menu-item__icon">✓</span><span>My tasks</span>${renderOutstandingTaskAlert(outstanding, "menu-item__task-alert")}<span class="menu-item__chevron">›</span></button>`;
+}
+
 function renderHub() {
   const reportAvailable = Boolean(report);
   const outstandingTasks = Number(state.taskData?.outstandingCount || 0);
@@ -385,10 +396,10 @@ function renderHub() {
         <span><strong>Weekly reports</strong><small>${reportAvailable ? "View your personalised weekly performance report" : "Your weekly report will be available here soon"}</small></span>
         <span class="hub-menu-card__arrow" aria-hidden="true">›</span>
       </button>
-      <button class="hub-menu-card hub-menu-card--tasks" type="button" data-section="tasks">
+      <button class="hub-menu-card hub-menu-card--tasks ${outstandingTasks ? "is-urgent" : ""}" type="button" data-section="tasks">
         <span class="hub-menu-card__icon" aria-hidden="true">✓</span>
         <span><strong>My tasks</strong><small>${outstandingTasks ? `${outstandingTasks} outstanding ${outstandingTasks === 1 ? "task" : "tasks"}` : "View tasks and reminders assigned to you"}</small></span>
-        ${outstandingTasks ? `<b class="hub-menu-card__badge" aria-label="${outstandingTasks} outstanding tasks">${outstandingTasks}</b>` : ""}<span class="hub-menu-card__arrow" aria-hidden="true">›</span>
+        ${renderOutstandingTaskAlert(outstandingTasks, "hub-menu-card__task-alert")}<span class="hub-menu-card__arrow" aria-hidden="true">›</span>
       </button>
       ${canManageUsers() ? `<button class="hub-menu-card hub-menu-card--users" type="button" data-section="users">
         <span class="hub-menu-card__icon" aria-hidden="true">♙</span>
@@ -470,17 +481,24 @@ function renderTasks() {
   const taskData = state.taskData;
   if (!taskData) return `<section class="loading">Loading your tasks…</section>`;
   const tasks = taskData.tasks || [];
-  const myTasks = tasks.filter((task) => task.assigneeId === state.user?.id && task.status !== "completed");
+  const activeTasks = tasks.filter((task) => task.status !== "completed");
+  const myTasks = activeTasks.filter((task) => task.assigneeId === state.user?.id && ["open", "declined"].includes(task.status));
+  const tasksYouSet = activeTasks.filter((task) => task.creatorId === state.user?.id && task.assigneeId !== state.user?.id && task.status !== "awaiting_approval");
+  const allTasksView = Boolean(taskData.canManageAll);
   const awaitingReview = tasks.filter((task) => task.status === "awaiting_approval" && (task.creatorId === state.user?.id || taskData.canManageAll));
-  const completed = tasks.filter((task) => task.status === "completed" && (task.assigneeId === state.user?.id || task.creatorId === state.user?.id));
+  const completed = tasks.filter((task) => task.status === "completed" && (allTasksView || task.assigneeId === state.user?.id || task.creatorId === state.user?.id));
   const notifications = taskData.notifications || [];
   const unreadNotifications = notifications.filter((note) => !note.readAt).length;
+  const primaryTasks = allTasksView ? activeTasks : myTasks;
+  const primaryLabel = allTasksView ? "All active tasks" : "Tasks for you";
+  const primaryEmpty = allTasksView ? "There are no active tasks across the team." : "You have no outstanding tasks.";
   return `<section class="tasks-page">
     <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
-    <div class="page-intro"><p class="eyebrow">LARDER INFORMATION HUB</p><h2>My tasks</h2><p>Keep on top of tasks assigned to you, and send tasks where your account allows it.</p></div>
+    <div class="page-intro"><p class="eyebrow">LARDER INFORMATION HUB</p><h2>My tasks</h2><p>${allTasksView ? "See every task set across the team, including the tasks you have created." : "Keep on top of tasks assigned to you and follow the tasks you have set."}</p></div>
     <section class="task-summary"><div><strong>${taskData.outstandingCount || 0}</strong><span>Outstanding</span></div><div><strong>${awaitingReview.length}</strong><span>Awaiting approval</span></div><div class="task-summary__actions">${taskData.canCreate ? '<button type="button" data-section="set-task">Set a task</button>' : ""}<button type="button" data-action="enable-phone-notifications">Enable phone reminders</button></div></section>
     ${state.taskMessage ? `<p class="task-message">${escapeHtml(state.taskMessage)}</p>` : ""}
-    <section class="task-list-section"><div class="section-label"><span></span>Tasks for you</div>${myTasks.length ? `<div class="task-list">${myTasks.map(renderTaskCard).join("")}</div>` : '<p class="task-empty">You have no outstanding tasks.</p>'}</section>
+    <section class="task-list-section"><div class="section-label"><span></span>${primaryLabel}</div>${primaryTasks.length ? `<div class="task-list">${primaryTasks.map(renderTaskCard).join("")}</div>` : `<p class="task-empty">${primaryEmpty}</p>`}</section>
+    ${!allTasksView && tasksYouSet.length ? `<section class="task-list-section"><div class="section-label"><span></span>Tasks you have set</div><div class="task-list">${tasksYouSet.map(renderTaskCard).join("")}</div></section>` : ""}
     ${awaitingReview.length ? `<section class="task-list-section"><div class="section-label"><span></span>Ready for your review</div><div class="task-list">${awaitingReview.map(renderTaskCard).join("")}</div></section>` : ""}
     ${completed.length ? `<section class="task-list-section"><div class="section-label"><span></span>Recently completed</div><div class="task-list">${completed.slice(0, 8).map(renderTaskCard).join("")}</div></section>` : ""}
     <section class="task-notifications"><div class="task-notifications__heading"><div class="section-label"><span></span>Updates</div>${unreadNotifications ? `<button type="button" data-action="mark-task-notifications-read">Mark all read</button>` : ""}</div>${notifications.length ? `<div>${notifications.slice(0, 12).map((note) => `<article class="task-notification ${note.readAt ? "" : "is-unread"}"><strong>${escapeHtml(note.title)}</strong><span>${escapeHtml(note.message)}</span><small>${escapeHtml(formatDateTime(note.createdAt))}</small></article>`).join("")}</div>` : '<p class="task-empty">Task updates will appear here.</p>'}</section>
@@ -880,7 +898,7 @@ function renderMenu() {
     setDrawerHeading("TASKS MENU", "My tasks");
     const taskMenuItems = [
       `<button class="menu-item" data-section="hub"><span class="menu-item__icon">⌂</span><span>Information Hub</span><span class="menu-item__chevron">›</span></button>`,
-      `<button class="menu-item ${state.section === "tasks" ? "is-active" : ""}" data-section="tasks"><span class="menu-item__icon">✓</span><span>My tasks${state.taskData?.outstandingCount ? ` <b class="menu-item__badge">${state.taskData.outstandingCount}</b>` : ""}</span><span class="menu-item__chevron">›</span></button>`,
+      renderTaskMenuItem(state.section === "tasks"),
       ...(state.taskData?.canCreate ? [`<button class="menu-item ${state.section === "set-task" ? "is-active" : ""}" data-section="set-task"><span class="menu-item__icon">+</span><span>Set a task</span><span class="menu-item__chevron">›</span></button>`] : []),
     ];
     if (canManageUsers() && !state.previewUser) {
@@ -916,7 +934,7 @@ function renderMenu() {
     sectionMenu.innerHTML = [
       `<button class="menu-item is-active" data-section="hub"><span class="menu-item__icon">⌂</span><span>Information Hub</span><span class="menu-item__chevron">›</span></button>`,
       `<button class="menu-item" data-section="overview"><span class="menu-item__icon">▦</span><span>Weekly reports</span><span class="menu-item__chevron">›</span></button>`,
-      `<button class="menu-item" data-section="tasks"><span class="menu-item__icon">✓</span><span>My tasks${state.taskData?.outstandingCount ? ` <b class="menu-item__badge">${state.taskData.outstandingCount}</b>` : ""}</span><span class="menu-item__chevron">›</span></button>`,
+      renderTaskMenuItem(),
       ...(canManageUsers() && !state.previewUser ? [`<button class="menu-item" data-section="users"><span class="menu-item__icon">♙</span><span>Users</span><span class="menu-item__chevron">›</span></button>`] : []),
       ...(canViewExecutiveDashboard() ? [`<button class="menu-item menu-item--executive" data-section="executive"><span class="menu-item__icon">↗</span><span>Executive dashboard</span><span class="menu-item__chevron">›</span></button>`] : []),
     ].join("");

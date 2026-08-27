@@ -51,6 +51,8 @@ let state = {
   executive: null,
   executivePeriod: "",
   executiveMetricModes: {},
+  executiveDetailMetric: "",
+  executiveDetailOverlays: [],
 };
 let expandedTable = null;
 let sharedReportVersion = "";
@@ -620,7 +622,8 @@ function executiveCardDetails({ id, label, key, kind, aggregate = "mean", lowerI
 
 function renderExecutiveKpi(options) {
   const card = executiveCardDetails(options);
-  return `<article class="executive-kpi executive-kpi--${card.trend?.tone || "neutral"}"><div class="executive-card-heading"><span>${escapeHtml(card.label)}</span>${card.toggle}</div><strong>${executiveFormat(card.current, card.kind)}</strong><small class="executive-card__basis">${escapeHtml(card.basis)}</small>${card.trend ? `<small class="trend trend--${card.trend.tone}">${escapeHtml(card.trend.text)}</small>` : ""}</article>`;
+  const interaction = options.id ? `data-action="open-executive-detail" data-metric="${escapeHtml(options.id)}" tabindex="0" role="button" aria-label="View ${escapeHtml(card.label)} through time"` : "";
+  return `<article class="executive-kpi executive-metric-card executive-kpi--${card.trend?.tone || "neutral"}" ${interaction}><div class="executive-card-heading"><span>${escapeHtml(card.label)}</span>${card.toggle}</div><strong>${executiveFormat(card.current, card.kind)}</strong><small class="executive-card__basis">${escapeHtml(card.basis)}</small>${card.trend ? `<small class="trend trend--${card.trend.tone}">${escapeHtml(card.trend.text)}</small>` : ""}</article>`;
 }
 
 function executiveSvgPath(values, width, height, padding, min, max) {
@@ -689,7 +692,107 @@ function renderExecutiveCumulativeChart() {
 
 function renderExecutiveDriver(options) {
   const card = executiveCardDetails(options);
-  return `<article class="executive-driver executive-driver--${card.trend?.tone || "neutral"}"><div class="executive-card-heading"><span>${escapeHtml(card.label)}</span>${card.toggle}</div><strong>${executiveFormat(card.current, card.kind)}</strong><small class="executive-card__basis">${escapeHtml(card.basis)}</small>${card.trend ? `<small class="trend trend--${card.trend.tone}">${escapeHtml(card.trend.text)}</small>` : ""}</article>`;
+  const interaction = options.id ? `data-action="open-executive-detail" data-metric="${escapeHtml(options.id)}" tabindex="0" role="button" aria-label="View ${escapeHtml(card.label)} through time"` : "";
+  return `<article class="executive-driver executive-metric-card executive-driver--${card.trend?.tone || "neutral"}" ${interaction}><div class="executive-card-heading"><span>${escapeHtml(card.label)}</span>${card.toggle}</div><strong>${executiveFormat(card.current, card.kind)}</strong><small class="executive-card__basis">${escapeHtml(card.basis)}</small>${card.trend ? `<small class="trend trend--${card.trend.tone}">${escapeHtml(card.trend.text)}</small>` : ""}</article>`;
+}
+
+const executiveMeasureDefinitions = [
+  { id: "sales-ex", label: "Sales ex VAT", key: "salesEx", kind: "currency", aggregate: "sum", basis: "Total for selected period", valueToggle: true, valueToggleLabel: "£ change" },
+  { id: "total-covers", label: "Total covers", key: "covers", kind: "number", aggregate: "sum", basis: "Total covers in selected period" },
+  { id: "spend-per-head", label: "Average spend per head", key: "spendPerHead", kind: "currency", basis: "Average per reporting week" },
+  { id: "overall-gp", label: "Overall GP", kind: "percentage", ratio: { valueKey: "overallGpPounds", denominatorKey: "salesEx", valueKind: "currency", valueLabel: "Overall GP" } },
+  { id: "total-wages", label: "Total wages as % of sales", kind: "percentage", ratio: { valueKey: "totalWages", denominatorKey: "salesEx", valueKind: "currency", valueLabel: "Total wages" }, lowerIsBetter: true },
+  { id: "future-bookings", label: "Future bookings", key: "futureBookings", kind: "number", aggregate: "sum", basis: "Total bookings recorded in selected period" },
+  { id: "adjusted-food-gp", label: "Food GP (adjusted)", kind: "percentage", ratio: { valueKey: "adjustedFoodGpPounds", denominatorKey: "foodSalesInc", denominatorScale: 1 / 1.2, valueKind: "currency", valueLabel: "Food GP (adjusted)" } },
+  { id: "adjusted-drink-gp", label: "Drink GP (adjusted)", kind: "percentage", ratio: { valueKey: "adjustedDrinkGpPounds", denominatorKey: "drinkSalesInc", denominatorScale: 1 / 1.2, valueKind: "currency", valueLabel: "Drink GP (adjusted)" } },
+  { id: "senior-management-wages", label: "Senior management wages", kind: "percentage", ratio: { valueKey: "seniorManagementWages", denominatorKey: "salesEx", valueKind: "currency", valueLabel: "Senior management wages" }, lowerIsBetter: true },
+  { id: "comps", label: "Comps as % of sales", kind: "percentage", ratio: { valueKey: "comps", denominatorKey: "salesEx", valueKind: "currency", valueLabel: "Comps" }, lowerIsBetter: true },
+  { id: "expenses", label: "Operating expenses", key: "expenses", kind: "currency", aggregate: "sum", basis: "Total for selected period", lowerIsBetter: true },
+];
+
+function executiveMeasureDefinition(id) {
+  return executiveMeasureDefinitions.find((measure) => measure.id === id) || null;
+}
+
+function executiveMeasureDisplay(rows, measure) {
+  const showValue = Boolean(measure?.ratio && state.executiveMetricModes?.[measure.id] === "value");
+  return {
+    value: executiveCardMetric(rows, measure || {}, showValue),
+    kind: measure?.ratio && showValue ? measure.ratio.valueKind || "currency" : measure?.kind || "number",
+    label: measure?.ratio && showValue ? measure.ratio.valueLabel || measure.label : measure?.label || "Metric",
+    isPercentage: Boolean(measure?.ratio && !showValue),
+  };
+}
+
+function executiveDetailWindow() {
+  const allWeeks = executiveRows().map((row) => row.week);
+  const period = state.executivePeriod || defaultExecutivePeriod();
+  if (period === "all") {
+    const latestYear = allWeeks.at(-1)?.slice(0, 4);
+    return { weeks: allWeeks.filter((week) => week.startsWith(`${latestYear}-`)), title: `${latestYear} to date`, fromAllData: true };
+  }
+  return { weeks: executivePeriodWeeks(), title: executivePeriodTitle(), fromAllData: false };
+}
+
+function executiveOffsetWeek(week, yearsBack) {
+  const date = new Date(`${week}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - (364 * yearsBack));
+  return date.toISOString().slice(0, 10);
+}
+
+function executiveSameWeekSets() {
+  const window = executiveDetailWindow();
+  const entries = state.executive?.rows || {};
+  if (!window.weeks.length) return { ...window, sets: [] };
+  const sets = [];
+  for (let yearsBack = 0; yearsBack < 5; yearsBack += 1) {
+    const weeks = window.weeks.map((week) => executiveOffsetWeek(week, yearsBack));
+    const rows = weeks.map((week) => Object.prototype.hasOwnProperty.call(entries, week) ? { week, ...entries[week] } : null);
+    if (rows.some((row) => row === null)) break;
+    const year = weeks.at(-1).slice(0, 4);
+    sets.push({ year, weeks, rows, label: yearsBack === 0 ? window.title : window.title === "Latest 13 weeks" ? `${year} same 13 weeks` : `${year} to date` });
+  }
+  return { ...window, sets };
+}
+
+function renderExecutiveOverlayChart(measures, rows) {
+  const colours = ["#b95246", "#315640", "#b89221", "#6860a5"];
+  const plotted = measures.map((measure, index) => {
+    const values = rows.map((row) => executiveMeasureDisplay([row], measure).value);
+    const finite = values.filter((value) => Number.isFinite(value));
+    const minimum = Math.min(...finite);
+    const range = Math.max(...finite) - minimum || 1;
+    return { label: executiveMeasureDisplay(rows, measure).label, colour: colours[index % colours.length], values: values.map((value) => Number.isFinite(value) ? (value - minimum) / range : null) };
+  });
+  const values = plotted.flatMap((series) => series.values).filter((value) => value !== null);
+  if (!values.length) return `<article class="executive-panel executive-panel--chart"><p class="executive-empty">There is not enough data in this comparison window to draw a trend.</p></article>`;
+  const width = 680;
+  const height = 210;
+  const padding = 18;
+  const gridLines = [0.15, 0.5, 0.85].map((ratio) => `<line x1="${padding}" x2="${width - padding}" y1="${(height * ratio).toFixed(1)}" y2="${(height * ratio).toFixed(1)}" />`).join("");
+  return `<article class="executive-panel executive-panel--chart executive-detail-chart"><div class="executive-panel__heading"><div><p class="eyebrow">SELECTED COMPARISON WINDOW</p><h3>Weekly movement</h3></div><div class="executive-legend">${plotted.map((series) => `<span><i style="--series-colour:${series.colour}"></i>${escapeHtml(series.label)}</span>`).join("")}</div></div><svg class="executive-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Weekly movement of selected executive measures"><g class="executive-chart__grid">${gridLines}</g>${plotted.map((series) => `<path d="${executiveSvgPath(series.values, width, height, padding, 0, 1)}" style="--series-colour:${series.colour}"></path>`).join("")}</svg><p class="executive-panel__caption">Each line is scaled to its own range, so different measures can be compared by direction and timing. Use the figures above for the actual values.</p></article>`;
+}
+
+function renderExecutiveMeasureDetail() {
+  const primary = executiveMeasureDefinition(state.executiveDetailMetric);
+  if (!primary) return "";
+  const comparison = executiveSameWeekSets();
+  const sets = comparison.sets;
+  if (!sets.length) return "";
+  const overlays = (state.executiveDetailOverlays || []).map(executiveMeasureDefinition).filter(Boolean).filter((measure) => measure.id !== primary.id);
+  const measures = [primary, ...overlays];
+  const current = executiveMeasureDisplay(sets[0].rows, primary);
+  const overlayOptions = executiveMeasureDefinitions.filter((measure) => measure.id !== primary.id && !overlays.some((overlay) => overlay.id === measure.id));
+  return `<section class="executive-detail" id="executive-detail"><div class="executive-detail__heading"><div><p class="eyebrow">METRIC DETAIL</p><h3>${escapeHtml(current.label)} through time</h3><p>${comparison.fromAllData ? `Using the latest ${comparison.title} window—not the combined all-time total.` : `Using ${comparison.title.toLowerCase()}.`} Each year below covers the same ${comparison.weeks.length} reporting weeks.</p></div><button class="executive-detail__close" type="button" data-action="close-executive-detail">Close</button></div><div class="executive-detail__year-cards">${sets.map((set, index) => {
+    const display = executiveMeasureDisplay(set.rows, primary);
+    const trend = index ? executiveTrend(display.value, current.value, { mode: display.isPercentage ? "points" : "value", kind: display.kind, lowerIsBetter: primary.lowerIsBetter, label: `${sets[0].year} same weeks` }) : null;
+    return `<article class="executive-detail__year ${index === 0 ? "is-current" : ""}"><span>${escapeHtml(set.label)}</span><strong>${executiveFormat(display.value, display.kind)}</strong><small>${index === 0 ? "Current comparison window" : escapeHtml(trend?.text || "No comparable period")}</small></article>`;
+  }).join("")}</div><div class="executive-detail__controls"><label>Overlay another measure<select data-action="executive-detail-overlay"><option value="">Choose a measure…</option>${overlayOptions.map((measure) => `<option value="${escapeHtml(measure.id)}">${escapeHtml(measure.label)}</option>`).join("")}</select></label>${overlays.length ? `<div class="executive-detail__overlays">${overlays.map((measure) => `<span>${escapeHtml(executiveMeasureDisplay(sets[0].rows, measure).label)}<button type="button" data-action="remove-executive-overlay" data-metric="${escapeHtml(measure.id)}" aria-label="Remove ${escapeHtml(measure.label)}">×</button></span>`).join("")}</div>` : '<p>Select one or more measures to overlay their weekly movement.</p>'}</div>${overlays.length ? `<div class="executive-detail__overlay-figures">${overlays.map((measure) => {
+    const display = executiveMeasureDisplay(sets[0].rows, measure);
+    const prior = sets[1] ? executiveMeasureDisplay(sets[1].rows, measure) : null;
+    const trend = prior ? executiveTrend(display.value, prior.value, { mode: display.isPercentage ? "points" : "value", kind: display.kind, lowerIsBetter: measure.lowerIsBetter, label: `${sets[1].year} same weeks` }) : null;
+    return `<article><span>${escapeHtml(display.label)}</span><strong>${executiveFormat(display.value, display.kind)}</strong><small>${escapeHtml(trend?.text || "Current comparison window")}</small></article>`;
+  }).join("")}</div>` : ""}${renderExecutiveOverlayChart(measures, sets[0].rows)}</section>`;
 }
 
 function renderExecutiveDashboard() {
@@ -720,19 +823,20 @@ function renderExecutiveDashboard() {
     <section class="executive-controls" aria-label="Executive dashboard period"><label>Reporting period<select data-action="executive-period"><option value="latest-13" ${(state.executivePeriod || defaultExecutivePeriod()) === "latest-13" ? "selected" : ""}>Latest 13 weeks</option><option value="all" ${(state.executivePeriod || defaultExecutivePeriod()) === "all" ? "selected" : ""}>All available data</option>${years.map((year) => `<option value="${year}" ${(state.executivePeriod || defaultExecutivePeriod()) === year ? "selected" : ""}>${year} to date</option>`).join("")}</select></label><p><strong>${escapeHtml(executivePeriodTitle())}</strong><span>${rows.length} reporting weeks · sourced from the full Master Performance Sheet</span></p></section>
     <section class="executive-kpis" aria-label="Executive key performance indicators">
       ${renderExecutiveKpi({ id: "sales-ex", label: "Sales ex VAT", key: "salesEx", kind: "currency", aggregate: "sum", basis: "Total for selected period", valueToggle: true, valueToggleLabel: "£ change", rows, comparisonRows })}
-      ${renderExecutiveKpi({ label: "Total covers", key: "covers", kind: "number", aggregate: "sum", basis: "Total covers in selected period", rows, comparisonRows })}
-      ${renderExecutiveKpi({ label: "Average spend per head", key: "spendPerHead", kind: "currency", basis: "Average per reporting week", rows, comparisonRows })}
+      ${renderExecutiveKpi({ id: "total-covers", label: "Total covers", key: "covers", kind: "number", aggregate: "sum", basis: "Total covers in selected period", rows, comparisonRows })}
+      ${renderExecutiveKpi({ id: "spend-per-head", label: "Average spend per head", key: "spendPerHead", kind: "currency", basis: "Average per reporting week", rows, comparisonRows })}
       ${renderExecutiveKpi({ id: "overall-gp", label: "Overall GP", kind: "percentage", ratio: overallGp, rows, comparisonRows })}
       ${renderExecutiveKpi({ id: "total-wages", label: "Total wages as % of sales", kind: "percentage", ratio: totalWages, lowerIsBetter: true, rows, comparisonRows })}
-      ${renderExecutiveKpi({ label: "Future bookings", key: "futureBookings", kind: "number", aggregate: "sum", basis: "Total bookings recorded in selected period", rows, comparisonRows })}
+      ${renderExecutiveKpi({ id: "future-bookings", label: "Future bookings", key: "futureBookings", kind: "number", aggregate: "sum", basis: "Total bookings recorded in selected period", rows, comparisonRows })}
     </section>
+    ${renderExecutiveMeasureDetail()}
     <section class="executive-dashboard-grid">
       ${renderExecutiveCumulativeChart()}
       ${renderExecutiveChart({ title: "Covers and spend per head", caption: "Higher cover numbers are strongest when spend per head is stable or improving. Each series is scaled to its own range so both movements remain readable.", rows, source: "COVERS SUMMARY · SPH", normalise: true, series: [{ label: "Covers", key: "covers", colour: "#315640" }, { label: "Spend per head", key: "spendPerHead", colour: "#b89221" }] })}
       ${renderExecutiveChart({ title: "Margin and labour", caption: "Overall GP and total wage ratio are tracked together because growth only adds value when both move in the right direction.", rows, source: "GP OVERALL · WAGES", series: [{ label: "Overall GP", key: "overallGpPercent", colour: "#315640" }, { label: "Total wages", key: "totalWagePercent", colour: "#a84141" }] })}
     </section>
     <section class="executive-outlook"><div><p class="eyebrow">WHERE THE BUSINESS IS GOING</p><h3>Latest 13-week run rate</h3><p>This is a directional view, using the most recent 13 completed weeks rather than a forecast promise.</p></div><div class="executive-outlook__items"><article class="executive-outlook__item executive-outlook__item--${forwardSalesTrend.tone}"><span>Sales ex VAT</span><strong>${executiveFormat(executiveMetric(latestThirteen, "salesEx", "sum"), "currency")}</strong><small>${escapeHtml(forwardSalesTrend.text)}</small></article><article class="executive-outlook__item executive-outlook__item--${forwardWageTrend.tone}"><span>Wage ratio</span><strong>${executiveFormat(executiveRatioMetric(latestThirteen, totalWages), "percentage")}</strong><small>${escapeHtml(forwardWageTrend.text)}</small></article><article class="executive-outlook__item"><span>Future bookings</span><strong>${executiveFormat(executiveMetric(latestThirteen, "futureBookings", "sum"), "number")}</strong><small>Total bookings recorded across the latest 13 weeks</small></article></div></section>
-    <section class="executive-drivers"><div class="section-label"><span></span>Key margin and cost drivers</div><div class="executive-drivers__grid">${renderExecutiveDriver({ id: "adjusted-food-gp", label: "Food GP (adjusted)", kind: "percentage", ratio: adjustedFoodGp, rows, comparisonRows })}${renderExecutiveDriver({ id: "adjusted-drink-gp", label: "Drink GP (adjusted)", kind: "percentage", ratio: adjustedDrinkGp, rows, comparisonRows })}${renderExecutiveDriver({ id: "senior-management-wages", label: "Senior management wages", kind: "percentage", ratio: seniorManagementWages, rows, comparisonRows, lowerIsBetter: true })}${renderExecutiveDriver({ id: "comps", label: "Comps as % of sales", kind: "percentage", ratio: comps, rows, comparisonRows, lowerIsBetter: true })}${renderExecutiveDriver({ label: "Operating expenses", key: "expenses", kind: "currency", aggregate: "sum", basis: "Total for selected period", rows, comparisonRows, lowerIsBetter: true })}</div></section>
+    <section class="executive-drivers"><div class="section-label"><span></span>Key margin and cost drivers</div><div class="executive-drivers__grid">${renderExecutiveDriver({ id: "adjusted-food-gp", label: "Food GP (adjusted)", kind: "percentage", ratio: adjustedFoodGp, rows, comparisonRows })}${renderExecutiveDriver({ id: "adjusted-drink-gp", label: "Drink GP (adjusted)", kind: "percentage", ratio: adjustedDrinkGp, rows, comparisonRows })}${renderExecutiveDriver({ id: "senior-management-wages", label: "Senior management wages", kind: "percentage", ratio: seniorManagementWages, rows, comparisonRows, lowerIsBetter: true })}${renderExecutiveDriver({ id: "comps", label: "Comps as % of sales", kind: "percentage", ratio: comps, rows, comparisonRows, lowerIsBetter: true })}${renderExecutiveDriver({ id: "expenses", label: "Operating expenses", key: "expenses", kind: "currency", aggregate: "sum", basis: "Total for selected period", rows, comparisonRows, lowerIsBetter: true })}</div></section>
     <section class="executive-note"><strong>Data note</strong><span>Functions, shoots, utilities and some expense measures have shorter or intermittent history in this workbook. They are retained as contextual indicators; the core trajectory is based on weekly sales, covers, spend per head, GP and wages.</span></section>
   </section>`;
 }
@@ -1730,7 +1834,7 @@ async function signOut() {
   localPreviewModel = null;
   sharedReportVersion = "";
   lastActivityKey = "";
-  state = { section: "hub", week: "", sourceName: "", isUploaded: false, authMode: "login", authMessage: "You have signed out.", authToken: "", user: null, access: null, adminUsers: null, adminMessage: "", availableWeeks: [], taskData: null, taskMessage: "", menuMode: "report", executive: null, executivePeriod: "", executiveMetricModes: {} };
+  state = { section: "hub", week: "", sourceName: "", isUploaded: false, authMode: "login", authMessage: "You have signed out.", authToken: "", user: null, access: null, adminUsers: null, adminMessage: "", availableWeeks: [], taskData: null, taskMessage: "", menuMode: "report", executive: null, executivePeriod: "", executiveMetricModes: {}, executiveDetailMetric: "", executiveDetailOverlays: [] };
   updateTaskBadge(0);
   render();
 }
@@ -1803,6 +1907,39 @@ function attachDynamicListeners() {
     const modes = { ...(state.executiveMetricModes || {}) };
     modes[metric] = modes[metric] === "value" ? "percentage" : "value";
     state = { ...state, executiveMetricModes: modes };
+    render();
+  }));
+  document.querySelectorAll("[data-action='open-executive-detail']").forEach((card) => {
+    const openDetail = () => {
+      const metric = card.dataset.metric;
+      if (!metric) return;
+      state = { ...state, executiveDetailMetric: metric, executiveDetailOverlays: [] };
+      render();
+      document.querySelector("#executive-detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    card.addEventListener("click", (event) => {
+      if (event.target.closest("[data-action='toggle-executive-value']")) return;
+      openDetail();
+    });
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openDetail();
+      }
+    });
+  });
+  document.querySelectorAll("[data-action='close-executive-detail']").forEach((button) => button.addEventListener("click", () => {
+    state = { ...state, executiveDetailMetric: "", executiveDetailOverlays: [] };
+    render();
+  }));
+  document.querySelectorAll("[data-action='executive-detail-overlay']").forEach((select) => select.addEventListener("change", () => {
+    const metric = select.value;
+    if (!metric || (state.executiveDetailOverlays || []).includes(metric)) return;
+    state = { ...state, executiveDetailOverlays: [...(state.executiveDetailOverlays || []), metric].slice(0, 3) };
+    render();
+  }));
+  document.querySelectorAll("[data-action='remove-executive-overlay']").forEach((button) => button.addEventListener("click", () => {
+    state = { ...state, executiveDetailOverlays: (state.executiveDetailOverlays || []).filter((metric) => metric !== button.dataset.metric) };
     render();
   }));
   document.querySelectorAll("select[name='dateScope']").forEach((select) => select.addEventListener("change", () => {

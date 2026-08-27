@@ -603,11 +603,11 @@ function executiveCardDetails({ id, label, key, kind, aggregate = "mean", lowerI
   const showValue = Boolean((ratio || valueToggle) && state.executiveMetricModes?.[id] === "value");
   const current = executiveCardMetric(rows, { key, aggregate, ratio }, showValue);
   const previous = executiveCardMetric(comparisonRows, { key, aggregate, ratio }, showValue);
-  const trend = executiveTrend(current, previous, {
+  const trend = comparisonRows.length ? executiveTrend(current, previous, {
     lowerIsBetter,
     mode: ratio ? showValue ? "value" : "points" : showValue ? "value" : "relative",
     kind: ratio?.valueKind || kind,
-  });
+  }) : null;
   return {
     current,
     trend,
@@ -620,7 +620,7 @@ function executiveCardDetails({ id, label, key, kind, aggregate = "mean", lowerI
 
 function renderExecutiveKpi(options) {
   const card = executiveCardDetails(options);
-  return `<article class="executive-kpi executive-kpi--${card.trend.tone}"><div class="executive-card-heading"><span>${escapeHtml(card.label)}</span>${card.toggle}</div><strong>${executiveFormat(card.current, card.kind)}</strong><small class="executive-card__basis">${escapeHtml(card.basis)}</small><small class="trend trend--${card.trend.tone}">${escapeHtml(card.trend.text)}</small></article>`;
+  return `<article class="executive-kpi executive-kpi--${card.trend?.tone || "neutral"}"><div class="executive-card-heading"><span>${escapeHtml(card.label)}</span>${card.toggle}</div><strong>${executiveFormat(card.current, card.kind)}</strong><small class="executive-card__basis">${escapeHtml(card.basis)}</small>${card.trend ? `<small class="trend trend--${card.trend.tone}">${escapeHtml(card.trend.text)}</small>` : ""}</article>`;
 }
 
 function executiveSvgPath(values, width, height, padding, min, max) {
@@ -689,7 +689,7 @@ function renderExecutiveCumulativeChart() {
 
 function renderExecutiveDriver(options) {
   const card = executiveCardDetails(options);
-  return `<article class="executive-driver executive-driver--${card.trend.tone}"><div class="executive-card-heading"><span>${escapeHtml(card.label)}</span>${card.toggle}</div><strong>${executiveFormat(card.current, card.kind)}</strong><small class="executive-card__basis">${escapeHtml(card.basis)}</small><small class="trend trend--${card.trend.tone}">${escapeHtml(card.trend.text)}</small></article>`;
+  return `<article class="executive-driver executive-driver--${card.trend?.tone || "neutral"}"><div class="executive-card-heading"><span>${escapeHtml(card.label)}</span>${card.toggle}</div><strong>${executiveFormat(card.current, card.kind)}</strong><small class="executive-card__basis">${escapeHtml(card.basis)}</small>${card.trend ? `<small class="trend trend--${card.trend.tone}">${escapeHtml(card.trend.text)}</small>` : ""}</article>`;
 }
 
 function renderExecutiveDashboard() {
@@ -698,7 +698,8 @@ function renderExecutiveDashboard() {
   const years = executiveYears();
   const weeks = executivePeriodWeeks();
   const rows = executiveRowsForWeeks(weeks);
-  const comparisonRows = executiveComparableRows(weeks);
+  const showingAllAvailableData = (state.executivePeriod || defaultExecutivePeriod()) === "all";
+  const comparisonRows = showingAllAvailableData ? [] : executiveComparableRows(weeks);
   const latestThirteen = executiveRows().slice(-13);
   const priorThirteen = executiveRows().slice(-26, -13);
   const forwardSalesTrend = executiveTrend(executiveMetric(latestThirteen, "salesEx", "sum"), executiveMetric(priorThirteen, "salesEx", "sum"), { label: "previous 13 weeks" });

@@ -599,13 +599,13 @@ function executiveCardMetric(rows, { key, aggregate = "mean", ratio }, showValue
   return showValue ? executiveMetric(rows, ratio.valueKey, "sum") : executiveRatioMetric(rows, ratio);
 }
 
-function executiveCardDetails({ id, label, key, kind, aggregate = "mean", lowerIsBetter = false, rows, comparisonRows, ratio, basis }) {
-  const showValue = Boolean(ratio && state.executiveMetricModes?.[id] === "value");
+function executiveCardDetails({ id, label, key, kind, aggregate = "mean", lowerIsBetter = false, rows, comparisonRows, ratio, basis, valueToggle = false, valueToggleLabel = "£ value" }) {
+  const showValue = Boolean((ratio || valueToggle) && state.executiveMetricModes?.[id] === "value");
   const current = executiveCardMetric(rows, { key, aggregate, ratio }, showValue);
   const previous = executiveCardMetric(comparisonRows, { key, aggregate, ratio }, showValue);
   const trend = executiveTrend(current, previous, {
     lowerIsBetter,
-    mode: ratio ? showValue ? "value" : "points" : "relative",
+    mode: ratio ? showValue ? "value" : "points" : showValue ? "value" : "relative",
     kind: ratio?.valueKind || kind,
   });
   return {
@@ -614,7 +614,7 @@ function executiveCardDetails({ id, label, key, kind, aggregate = "mean", lowerI
     kind: ratio && showValue ? ratio.valueKind || "currency" : kind,
     label: ratio && showValue ? ratio.valueLabel || label : label,
     basis: ratio ? showValue ? "Total for selected period" : "Percentage of sales for selected period" : basis || (aggregate === "sum" ? "Total for selected period" : "Average per reporting week"),
-    toggle: ratio ? `<button class="executive-value-toggle" type="button" data-action="toggle-executive-value" data-metric="${escapeHtml(id)}">${showValue ? "Show %" : "£ value"}</button>` : "",
+    toggle: ratio || valueToggle ? `<button class="executive-value-toggle" type="button" data-action="toggle-executive-value" data-metric="${escapeHtml(id)}">${showValue ? "Show %" : escapeHtml(valueToggleLabel)}</button>` : "",
   };
 }
 
@@ -718,7 +718,7 @@ function renderExecutiveDashboard() {
     <div class="executive-hero"><p class="eyebrow">LARDER EXECUTIVE DASHBOARD</p><h2>Business trajectory</h2><p>See how volume, value, margin and labour have moved together—and which indicators are shaping the next few months.</p><img class="executive-hero__logo" src="./assets/larder-logo.png" alt="Larder Brasserie and Grill" /></div>
     <section class="executive-controls" aria-label="Executive dashboard period"><label>Reporting period<select data-action="executive-period"><option value="latest-13" ${(state.executivePeriod || defaultExecutivePeriod()) === "latest-13" ? "selected" : ""}>Latest 13 weeks</option><option value="all" ${(state.executivePeriod || defaultExecutivePeriod()) === "all" ? "selected" : ""}>All available data</option>${years.map((year) => `<option value="${year}" ${(state.executivePeriod || defaultExecutivePeriod()) === year ? "selected" : ""}>${year} to date</option>`).join("")}</select></label><p><strong>${escapeHtml(executivePeriodTitle())}</strong><span>${rows.length} reporting weeks · sourced from the full Master Performance Sheet</span></p></section>
     <section class="executive-kpis" aria-label="Executive key performance indicators">
-      ${renderExecutiveKpi({ label: "Sales ex VAT", key: "salesEx", kind: "currency", aggregate: "sum", basis: "Total for selected period", rows, comparisonRows })}
+      ${renderExecutiveKpi({ id: "sales-ex", label: "Sales ex VAT", key: "salesEx", kind: "currency", aggregate: "sum", basis: "Total for selected period", valueToggle: true, valueToggleLabel: "£ change", rows, comparisonRows })}
       ${renderExecutiveKpi({ label: "Total covers", key: "covers", kind: "number", aggregate: "sum", basis: "Total covers in selected period", rows, comparisonRows })}
       ${renderExecutiveKpi({ label: "Average spend per head", key: "spendPerHead", kind: "currency", basis: "Average per reporting week", rows, comparisonRows })}
       ${renderExecutiveKpi({ id: "overall-gp", label: "Overall GP", kind: "percentage", ratio: overallGp, rows, comparisonRows })}

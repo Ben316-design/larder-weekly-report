@@ -1044,7 +1044,15 @@ function applyExecutiveScenario() {
   const rows = executiveRowsForWeeks(executivePeriodWeeks());
   const { baseline, scenario } = executiveScenarioForRows(rows);
   if (!planner || !baseline || !scenario) return;
-  const read = (field) => Number(planner.querySelector(`[data-action='edit-executive-scenario'][data-field='${field}']`)?.value);
+  const inputFor = (field) => planner.querySelector(`[data-action='edit-executive-scenario'][data-field='${field}']`);
+  const read = (field) => {
+    const value = inputFor(field)?.value;
+    return value === undefined || value === "" ? Number.NaN : Number(value);
+  };
+  const wasEdited = (field) => {
+    const input = inputFor(field);
+    return Boolean(input) && input.value !== input.defaultValue;
+  };
   const selectedMode = (field) => planner.querySelector(`[data-action='set-executive-scenario-mode'][data-field='${field}']`)?.value;
   const requestedSales = read("sales");
   const requestedCovers = read("covers");
@@ -1052,9 +1060,9 @@ function applyExecutiveScenario() {
   const coversMode = selectedMode("covers") || scenario.coversMode || "total";
   const currentCoversInput = coversMode === "per-week" ? scenario.coversWeeklyAdjustment : scenario.covers;
   const current = executiveScenarioMetrics(baseline, scenario);
-  const salesChanged = Number.isFinite(requestedSales) && Math.abs(requestedSales - current.sales) > .01;
-  const coversChanged = Number.isFinite(requestedCovers) && Math.abs(requestedCovers - currentCoversInput) > .01;
-  const spendChanged = Number.isFinite(requestedSpend) && Math.abs(requestedSpend - scenario.spendPerHead) > .001;
+  const salesChanged = wasEdited("sales") && Number.isFinite(requestedSales);
+  const coversChanged = wasEdited("covers") && Number.isFinite(requestedCovers) && Math.abs(requestedCovers - currentCoversInput) > .01;
+  const spendChanged = wasEdited("spendPerHead") && Number.isFinite(requestedSpend);
   const next = { ...scenario };
   next.coversMode = coversMode;
   if (coversChanged) {
@@ -1075,10 +1083,10 @@ function applyExecutiveScenario() {
   const displayedWages = next.wagesMode === "value" ? current.wages : current.wagesPercent * 100;
   const grossProfitTolerance = next.grossProfitMode === "value" ? .51 : .051;
   const wagesTolerance = next.wagesMode === "value" ? .51 : .051;
-  if (Number.isFinite(requestedGrossProfit) && requestedGrossProfit >= 0 && Math.abs(requestedGrossProfit - displayedGrossProfit) > grossProfitTolerance) {
+  if (wasEdited("grossProfit") && Number.isFinite(requestedGrossProfit) && requestedGrossProfit >= 0 && Math.abs(requestedGrossProfit - displayedGrossProfit) > grossProfitTolerance) {
     next.grossProfitPercent = next.grossProfitMode === "value" && metrics.sales > 0 ? requestedGrossProfit / metrics.sales : requestedGrossProfit / 100;
   }
-  if (Number.isFinite(requestedWages) && requestedWages >= 0 && Math.abs(requestedWages - displayedWages) > wagesTolerance) {
+  if (wasEdited("wages") && Number.isFinite(requestedWages) && requestedWages >= 0 && Math.abs(requestedWages - displayedWages) > wagesTolerance) {
     next.wagesPercent = next.wagesMode === "value" && metrics.sales > 0 ? requestedWages / metrics.sales : requestedWages / 100;
   }
   state = { ...state, executiveScenario: next };

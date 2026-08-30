@@ -54,6 +54,8 @@ let state = {
   executiveDetailMetric: "",
   executiveDetailOverlays: [],
   executiveDetailYearScope: "all",
+  executiveScenarioOpen: false,
+  executiveScenario: null,
 };
 let expandedTable = null;
 let sharedReportVersion = "";
@@ -853,6 +855,128 @@ function renderExecutiveMeasureDetail() {
   }).join("")}</div>` : ""}${renderExecutiveOverlayChart(measures, sets[0].rows)}</section>`;
 }
 
+function executiveScenarioKey() {
+  return `${executivePeriodGrain()}:${executiveSelectedPeriod()}`;
+}
+
+function executiveScenarioBaseline(rows) {
+  const sales = executiveMetric(rows, "salesEx", "sum");
+  const covers = executiveMetric(rows, "covers", "sum");
+  const spendPerHead = executiveMetric(rows, "spendPerHead", "mean");
+  const grossProfit = executiveMetric(rows, "overallGpPounds", "sum");
+  const wages = executiveMetric(rows, "totalWages", "sum");
+  if (![sales, covers, spendPerHead, grossProfit, wages].every(Number.isFinite) || sales <= 0 || covers <= 0 || spendPerHead <= 0) return null;
+  return {
+    sales,
+    covers,
+    spendPerHead,
+    grossProfit,
+    grossProfitPercent: grossProfit / sales,
+    wages,
+    wagesPercent: wages / sales,
+    gpAfterWages: grossProfit - wages,
+  };
+}
+
+function defaultExecutiveScenario(baseline) {
+  return {
+    periodKey: executiveScenarioKey(),
+    covers: baseline.covers,
+    spendPerHead: baseline.spendPerHead,
+    grossProfitPercent: baseline.grossProfitPercent,
+    wagesPercent: baseline.wagesPercent,
+    grossProfitMode: "percentage",
+    wagesMode: "percentage",
+  };
+}
+
+function executiveScenarioForRows(rows) {
+  const baseline = executiveScenarioBaseline(rows);
+  if (!baseline) return { baseline: null, scenario: null };
+  const scenario = state.executiveScenario?.periodKey === executiveScenarioKey()
+    ? state.executiveScenario
+    : defaultExecutiveScenario(baseline);
+  return { baseline, scenario };
+}
+
+function executiveScenarioMetrics(baseline, scenario) {
+  const coverFactor = scenario.covers / baseline.covers;
+  const spendFactor = scenario.spendPerHead / baseline.spendPerHead;
+  const sales = baseline.sales * coverFactor * spendFactor;
+  const grossProfit = sales * scenario.grossProfitPercent;
+  const wages = sales * scenario.wagesPercent;
+  return {
+    sales,
+    covers: scenario.covers,
+    spendPerHead: scenario.spendPerHead,
+    grossProfit,
+    grossProfitPercent: scenario.grossProfitPercent,
+    wages,
+    wagesPercent: scenario.wagesPercent,
+    gpAfterWages: grossProfit - wages,
+  };
+}
+
+function executiveScenarioInputValue(value, decimals = 2) {
+  return Number.isFinite(value) ? Number(value).toFixed(decimals) : "";
+}
+
+function renderExecutiveScenarioResult({ label, value, baseline, kind = "currency", lowerIsBetter = false, supportingText = "" }) {
+  const trend = executiveTrend(value, baseline, { mode: kind === "percentage" ? "points" : "value", kind, lowerIsBetter, label: "selected period" });
+  return `<article class="executive-scenario__result executive-scenario__result--${trend.tone}"><span>${escapeHtml(label)}</span><strong>${executiveFormat(value, kind)}</strong>${supportingText ? `<small>${escapeHtml(supportingText)}</small>` : ""}<small class="trend trend--${trend.tone}">${escapeHtml(trend.text)}</small></article>`;
+}
+
+function renderExecutiveScenarioPlanner(rows) {
+  if (!state.executiveScenarioOpen) return "";
+  const { baseline, scenario } = executiveScenarioForRows(rows);
+  if (!baseline || !scenario) return "";
+  const metrics = executiveScenarioMetrics(baseline, scenario);
+  const gpInput = scenario.grossProfitMode === "value" ? metrics.grossProfit : metrics.grossProfitPercent * 100;
+  const wagesInput = scenario.wagesMode === "value" ? metrics.wages : metrics.wagesPercent * 100;
+  const gpUnit = scenario.grossProfitMode === "value" ? "£ value" : "% of sales";
+  const wagesUnit = scenario.wagesMode === "value" ? "£ value" : "% of sales";
+  return `<section class="executive-scenario" id="executive-scenario" aria-label="Scenario planner"><div class="executive-scenario__heading"><div><p class="eyebrow">SCENARIO PLANNER</p><h3>Test a change before it happens</h3><p>Start with the selected period, adjust an assumption, and see the linked sales, margin and wage effect. This does not change the report or your spreadsheet.</p></div><button type="button" data-action="close-executive-scenario">Close</button></div><div class="executive-scenario__inputs"><label>Sales ex VAT<input type="number" inputmode="decimal" min="0" step="1" data-action="edit-executive-scenario" data-field="sales" value="${executiveScenarioInputValue(metrics.sales, 0)}" /><small>Changing sales recalculates spend per head.</small></label><label>Total covers<input type="number" inputmode="numeric" min="0" step="1" data-action="edit-executive-scenario" data-field="covers" value="${executiveScenarioInputValue(scenario.covers, 0)}" /></label><label>Average spend per head<input type="number" inputmode="decimal" min="0" step="0.01" data-action="edit-executive-scenario" data-field="spendPerHead" value="${executiveScenarioInputValue(scenario.spendPerHead)}" /></label><label>Overall GP mode<select data-action="set-executive-scenario-mode" data-field="grossProfit"><option value="percentage" ${scenario.grossProfitMode === "percentage" ? "selected" : ""}>Percentage of sales</option><option value="value" ${scenario.grossProfitMode === "value" ? "selected" : ""}>£ value</option></select><input type="number" inputmode="decimal" min="0" step="${scenario.grossProfitMode === "value" ? "1" : "0.1"}" data-action="edit-executive-scenario" data-field="grossProfit" value="${executiveScenarioInputValue(gpInput, scenario.grossProfitMode === "value" ? 0 : 1)}" /><small>${gpUnit}</small></label><label>Total wages mode<select data-action="set-executive-scenario-mode" data-field="wages"><option value="percentage" ${scenario.wagesMode === "percentage" ? "selected" : ""}>Percentage of sales</option><option value="value" ${scenario.wagesMode === "value" ? "selected" : ""}>£ value</option></select><input type="number" inputmode="decimal" min="0" step="${scenario.wagesMode === "value" ? "1" : "0.1"}" data-action="edit-executive-scenario" data-field="wages" value="${executiveScenarioInputValue(wagesInput, scenario.wagesMode === "value" ? 0 : 1)}" /><small>${wagesUnit}</small></label></div><div class="executive-scenario__footer"><p>Future bookings are intentionally excluded: this is an operating scenario, not a booking forecast.</p><div><button type="button" data-action="apply-executive-scenario">Apply scenario</button><button type="button" data-action="reset-executive-scenario">Reset to selected period</button></div></div><div class="executive-scenario__results"><p>SCENARIO RESULT</p><div>${renderExecutiveScenarioResult({ label: "Sales ex VAT", value: metrics.sales, baseline: baseline.sales })}${renderExecutiveScenarioResult({ label: "Total covers", value: metrics.covers, baseline: baseline.covers, kind: "number" })}${renderExecutiveScenarioResult({ label: "Average spend per head", value: metrics.spendPerHead, baseline: baseline.spendPerHead })}${renderExecutiveScenarioResult({ label: "Overall GP", value: metrics.grossProfit, baseline: baseline.grossProfit, supportingText: `${executiveFormat(metrics.grossProfitPercent, "percentage")} of sales` })}${renderExecutiveScenarioResult({ label: "Total wages", value: metrics.wages, baseline: baseline.wages, lowerIsBetter: true, supportingText: `${executiveFormat(metrics.wagesPercent, "percentage")} of sales` })}${renderExecutiveScenarioResult({ label: "GP after wages", value: metrics.gpAfterWages, baseline: baseline.gpAfterWages, supportingText: "Gross profit less total wages" })}</div></div></section>`;
+}
+
+function applyExecutiveScenario() {
+  const planner = document.querySelector("#executive-scenario");
+  const rows = executiveRowsForWeeks(executivePeriodWeeks());
+  const { baseline, scenario } = executiveScenarioForRows(rows);
+  if (!planner || !baseline || !scenario) return;
+  const read = (field) => Number(planner.querySelector(`[data-action='edit-executive-scenario'][data-field='${field}']`)?.value);
+  const selectedMode = (field) => planner.querySelector(`[data-action='set-executive-scenario-mode'][data-field='${field}']`)?.value;
+  const requestedSales = read("sales");
+  const requestedCovers = read("covers");
+  const requestedSpend = read("spendPerHead");
+  const current = executiveScenarioMetrics(baseline, scenario);
+  const salesChanged = Number.isFinite(requestedSales) && Math.abs(requestedSales - current.sales) > .01;
+  const coversChanged = Number.isFinite(requestedCovers) && Math.abs(requestedCovers - scenario.covers) > .01;
+  const spendChanged = Number.isFinite(requestedSpend) && Math.abs(requestedSpend - scenario.spendPerHead) > .001;
+  const next = { ...scenario };
+  if (coversChanged && requestedCovers >= 0) next.covers = requestedCovers;
+  if (spendChanged && requestedSpend >= 0) next.spendPerHead = requestedSpend;
+  if (salesChanged && requestedSales >= 0 && next.covers > 0) {
+    next.spendPerHead = baseline.spendPerHead * (requestedSales / baseline.sales) * (baseline.covers / next.covers);
+  }
+  next.grossProfitMode = selectedMode("grossProfit") || next.grossProfitMode;
+  next.wagesMode = selectedMode("wages") || next.wagesMode;
+  const metrics = executiveScenarioMetrics(baseline, next);
+  const requestedGrossProfit = read("grossProfit");
+  const requestedWages = read("wages");
+  const displayedGrossProfit = next.grossProfitMode === "value" ? current.grossProfit : current.grossProfitPercent * 100;
+  const displayedWages = next.wagesMode === "value" ? current.wages : current.wagesPercent * 100;
+  const grossProfitTolerance = next.grossProfitMode === "value" ? .51 : .051;
+  const wagesTolerance = next.wagesMode === "value" ? .51 : .051;
+  if (Number.isFinite(requestedGrossProfit) && requestedGrossProfit >= 0 && Math.abs(requestedGrossProfit - displayedGrossProfit) > grossProfitTolerance) {
+    next.grossProfitPercent = next.grossProfitMode === "value" && metrics.sales > 0 ? requestedGrossProfit / metrics.sales : requestedGrossProfit / 100;
+  }
+  if (Number.isFinite(requestedWages) && requestedWages >= 0 && Math.abs(requestedWages - displayedWages) > wagesTolerance) {
+    next.wagesPercent = next.wagesMode === "value" && metrics.sales > 0 ? requestedWages / metrics.sales : requestedWages / 100;
+  }
+  state = { ...state, executiveScenario: next };
+  render();
+}
+
 function renderExecutiveDashboard() {
   const allRows = executiveRows();
   if (!allRows.length) return `<section class="executive-page"><button class="back-link" type="button" data-section="hub">&larr; Information Hub</button><div class="page-intro"><p class="eyebrow">EXECUTIVE DASHBOARD</p><h2>Business trajectory</h2><p>Upload the full Master Performance Sheet to prepare the long-term dashboard.</p></div></section>`;
@@ -887,7 +1011,7 @@ function renderExecutiveDashboard() {
   return `<section class="executive-page">
     <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
     <div class="executive-hero"><p class="eyebrow">LARDER EXECUTIVE DASHBOARD</p><h2>Business trajectory</h2><p>See how volume, value, margin and labour have moved together—and which indicators are shaping the next few months.</p><img class="executive-hero__logo" src="./assets/larder-logo.png" alt="Larder Brasserie and Grill" /></div>
-    <section class="executive-controls" aria-label="Executive dashboard period"><label>View by<select data-action="executive-grain"><option value="month" ${grain === "month" ? "selected" : ""}>Month</option><option value="quarter" ${grain === "quarter" ? "selected" : ""}>Quarter</option><option value="year" ${grain === "year" ? "selected" : ""}>Calendar year</option><option value="latest-13" ${grain === "latest-13" ? "selected" : ""}>Latest 13 weeks</option><option value="all" ${grain === "all" ? "selected" : ""}>All available data</option></select></label>${periodOptions.length ? `<label>Period<select data-action="executive-period">${periodOptions.map((option) => `<option value="${escapeHtml(option.value)}" ${selectedPeriod === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select></label>` : ""}<p><strong>${escapeHtml(executivePeriodTitle())}</strong><span>${rows.length} reporting weeks · ${comparisonNote}</span></p></section>
+    <section class="executive-controls" aria-label="Executive dashboard period"><label>View by<select data-action="executive-grain"><option value="month" ${grain === "month" ? "selected" : ""}>Month</option><option value="quarter" ${grain === "quarter" ? "selected" : ""}>Quarter</option><option value="year" ${grain === "year" ? "selected" : ""}>Calendar year</option><option value="latest-13" ${grain === "latest-13" ? "selected" : ""}>Latest 13 weeks</option><option value="all" ${grain === "all" ? "selected" : ""}>All available data</option></select></label>${periodOptions.length ? `<label>Period<select data-action="executive-period">${periodOptions.map((option) => `<option value="${escapeHtml(option.value)}" ${selectedPeriod === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select></label>` : ""}<button class="executive-scenario-button" type="button" data-action="open-executive-scenario"><span aria-hidden="true">∑</span> Scenario planner</button><p><strong>${escapeHtml(executivePeriodTitle())}</strong><span>${rows.length} reporting weeks · ${comparisonNote}</span></p></section>
     <section class="executive-kpis" aria-label="Executive key performance indicators">
       ${renderExecutiveKpi({ id: "sales-ex", label: "Sales ex VAT", key: "salesEx", kind: "currency", aggregate: "sum", basis: "Total for selected period", valueToggle: true, valueToggleLabel: "£ change", rows, comparisonRows })}
       ${renderExecutiveKpi({ id: "total-covers", label: "Total covers", key: "covers", kind: "number", aggregate: "sum", basis: "Total covers in selected period", rows, comparisonRows })}
@@ -896,6 +1020,7 @@ function renderExecutiveDashboard() {
       ${renderExecutiveKpi({ id: "total-wages", label: "Total wages as % of sales", kind: "percentage", ratio: totalWages, lowerIsBetter: true, rows, comparisonRows })}
       ${renderExecutiveKpi({ id: "future-bookings", label: "Future bookings", key: "futureBookings", kind: "number", aggregate: "sum", basis: "Total bookings recorded in selected period", rows, comparisonRows })}
     </section>
+    ${renderExecutiveScenarioPlanner(rows)}
     ${renderExecutiveMeasureDetail()}
     <section class="executive-dashboard-grid">
       ${renderExecutiveCumulativeChart()}
@@ -1901,7 +2026,7 @@ async function signOut() {
   localPreviewModel = null;
   sharedReportVersion = "";
   lastActivityKey = "";
-  state = { section: "hub", week: "", sourceName: "", isUploaded: false, authMode: "login", authMessage: "You have signed out.", authToken: "", user: null, access: null, adminUsers: null, adminMessage: "", availableWeeks: [], taskData: null, taskMessage: "", menuMode: "report", executive: null, executivePeriod: "", executiveMetricModes: {}, executiveDetailMetric: "", executiveDetailOverlays: [], executiveDetailYearScope: "all" };
+  state = { section: "hub", week: "", sourceName: "", isUploaded: false, authMode: "login", authMessage: "You have signed out.", authToken: "", user: null, access: null, adminUsers: null, adminMessage: "", availableWeeks: [], taskData: null, taskMessage: "", menuMode: "report", executive: null, executivePeriod: "", executiveMetricModes: {}, executiveDetailMetric: "", executiveDetailOverlays: [], executiveDetailYearScope: "all", executiveScenarioOpen: false, executiveScenario: null };
   updateTaskBadge(0);
   render();
 }
@@ -1966,11 +2091,43 @@ function attachDynamicListeners() {
   document.querySelectorAll("[data-action='choose-calendar-week']").forEach((button) => button.addEventListener("click", () => { void changeReportWeek(button.dataset.week); }));
   document.querySelectorAll("[data-action='executive-grain']").forEach((select) => select.addEventListener("change", () => {
     const grain = select.value;
-    state = { ...state, executiveGrain: grain, executivePeriod: defaultExecutivePeriodForGrain(grain), executiveDetailMetric: "", executiveDetailOverlays: [] };
+    state = { ...state, executiveGrain: grain, executivePeriod: defaultExecutivePeriodForGrain(grain), executiveDetailMetric: "", executiveDetailOverlays: [], executiveScenarioOpen: false, executiveScenario: null };
     render();
   }));
   document.querySelectorAll("[data-action='executive-period']").forEach((select) => select.addEventListener("change", () => {
-    state = { ...state, executivePeriod: select.value, executiveDetailMetric: "", executiveDetailOverlays: [] };
+    state = { ...state, executivePeriod: select.value, executiveDetailMetric: "", executiveDetailOverlays: [], executiveScenarioOpen: false, executiveScenario: null };
+    render();
+  }));
+  document.querySelectorAll("[data-action='open-executive-scenario']").forEach((button) => button.addEventListener("click", () => {
+    const rows = executiveRowsForWeeks(executivePeriodWeeks());
+    const baseline = executiveScenarioBaseline(rows);
+    if (!baseline) return;
+    state = { ...state, executiveScenarioOpen: true, executiveScenario: defaultExecutiveScenario(baseline), executiveDetailMetric: "", executiveDetailOverlays: [] };
+    render();
+    document.querySelector("#executive-scenario")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }));
+  document.querySelectorAll("[data-action='close-executive-scenario']").forEach((button) => button.addEventListener("click", () => {
+    state = { ...state, executiveScenarioOpen: false };
+    render();
+  }));
+  document.querySelectorAll("[data-action='reset-executive-scenario']").forEach((button) => button.addEventListener("click", () => {
+    const rows = executiveRowsForWeeks(executivePeriodWeeks());
+    const baseline = executiveScenarioBaseline(rows);
+    if (!baseline) return;
+    state = { ...state, executiveScenario: defaultExecutiveScenario(baseline) };
+    render();
+  }));
+  document.querySelectorAll("[data-action='apply-executive-scenario']").forEach((button) => button.addEventListener("click", () => {
+    applyExecutiveScenario();
+  }));
+  document.querySelectorAll("[data-action='set-executive-scenario-mode']").forEach((select) => select.addEventListener("change", () => {
+    const rows = executiveRowsForWeeks(executivePeriodWeeks());
+    const { baseline, scenario } = executiveScenarioForRows(rows);
+    if (!baseline || !scenario) return;
+    const next = { ...scenario };
+    if (select.dataset.field === "grossProfit") next.grossProfitMode = select.value;
+    if (select.dataset.field === "wages") next.wagesMode = select.value;
+    state = { ...state, executiveScenario: next };
     render();
   }));
   document.querySelectorAll("[data-action='toggle-executive-value']").forEach((button) => button.addEventListener("click", () => {

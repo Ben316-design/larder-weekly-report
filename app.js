@@ -865,6 +865,11 @@ function executiveScenarioBaseline(rows) {
   const spendPerHead = executiveMetric(rows, "spendPerHead", "mean");
   const grossProfit = executiveMetric(rows, "overallGpPounds", "sum");
   const wages = executiveMetric(rows, "totalWages", "sum");
+  const foodSalesEx = executiveMetric(rows, "foodSalesInc", "sum") / 1.2;
+  const drinkSalesEx = executiveMetric(rows, "drinkSalesInc", "sum") / 1.2;
+  const foodGrossProfit = executiveMetric(rows, "adjustedFoodGpPounds", "sum");
+  const drinkGrossProfit = executiveMetric(rows, "adjustedDrinkGpPounds", "sum");
+  const hasFoodDrinkGp = [foodSalesEx, drinkSalesEx, foodGrossProfit, drinkGrossProfit].every(Number.isFinite) && foodSalesEx > 0 && drinkSalesEx > 0;
   if (![sales, covers, spendPerHead, grossProfit, wages].every(Number.isFinite) || sales <= 0 || covers <= 0 || spendPerHead <= 0) return null;
   return {
     sales,
@@ -873,6 +878,14 @@ function executiveScenarioBaseline(rows) {
     spendPerHead,
     grossProfit,
     grossProfitPercent: grossProfit / sales,
+    hasFoodDrinkGp,
+    foodSalesEx,
+    drinkSalesEx,
+    foodGrossProfit,
+    drinkGrossProfit,
+    foodGpPercent: hasFoodDrinkGp ? foodGrossProfit / foodSalesEx : null,
+    drinkGpPercent: hasFoodDrinkGp ? drinkGrossProfit / drinkSalesEx : null,
+    otherGrossProfit: hasFoodDrinkGp ? grossProfit - foodGrossProfit - drinkGrossProfit : null,
     wages,
     wagesPercent: wages / sales,
     gpAfterWages: grossProfit - wages,
@@ -887,6 +900,9 @@ function defaultExecutiveScenario(baseline) {
     coversWeeklyAdjustment: 0,
     spendPerHead: baseline.spendPerHead,
     grossProfitPercent: baseline.grossProfitPercent,
+    gpCalculationMode: "overall",
+    foodGpPercent: baseline.foodGpPercent,
+    drinkGpPercent: baseline.drinkGpPercent,
     wagesPercent: baseline.wagesPercent,
     grossProfitMode: "percentage",
     wagesMode: "percentage",
@@ -896,9 +912,10 @@ function defaultExecutiveScenario(baseline) {
 function executiveScenarioForRows(rows) {
   const baseline = executiveScenarioBaseline(rows);
   if (!baseline) return { baseline: null, scenario: null };
+  const defaultScenario = defaultExecutiveScenario(baseline);
   const scenario = state.executiveScenario?.periodKey === executiveScenarioKey()
-    ? state.executiveScenario
-    : defaultExecutiveScenario(baseline);
+    ? { ...defaultScenario, ...state.executiveScenario }
+    : defaultScenario;
   return { baseline, scenario };
 }
 
@@ -908,15 +925,24 @@ function executiveScenarioMetrics(baseline, scenario) {
     : scenario.covers);
   const coverFactor = covers / baseline.covers;
   const spendFactor = scenario.spendPerHead / baseline.spendPerHead;
+  const salesFactor = coverFactor * spendFactor;
   const sales = baseline.sales * coverFactor * spendFactor;
-  const grossProfit = sales * scenario.grossProfitPercent;
+  const foodGrossProfit = baseline.hasFoodDrinkGp ? baseline.foodSalesEx * salesFactor * scenario.foodGpPercent : null;
+  const drinkGrossProfit = baseline.hasFoodDrinkGp ? baseline.drinkSalesEx * salesFactor * scenario.drinkGpPercent : null;
+  const grossProfit = scenario.gpCalculationMode === "separate" && baseline.hasFoodDrinkGp
+    ? foodGrossProfit + drinkGrossProfit + baseline.otherGrossProfit * salesFactor
+    : sales * scenario.grossProfitPercent;
   const wages = sales * scenario.wagesPercent;
   return {
     sales,
     covers,
     spendPerHead: scenario.spendPerHead,
     grossProfit,
-    grossProfitPercent: scenario.grossProfitPercent,
+    grossProfitPercent: grossProfit / sales,
+    foodGrossProfit,
+    drinkGrossProfit,
+    foodGpPercent: baseline.hasFoodDrinkGp ? foodGrossProfit / (baseline.foodSalesEx * salesFactor) : null,
+    drinkGpPercent: baseline.hasFoodDrinkGp ? drinkGrossProfit / (baseline.drinkSalesEx * salesFactor) : null,
     wages,
     wagesPercent: scenario.wagesPercent,
     gpAfterWages: grossProfit - wages,
@@ -958,6 +984,7 @@ function renderExecutiveScenarioPlannerV2(rows) {
   const coversExplanation = coversPerWeek
     ? `${additionalCovers >= 0 ? "+" : ""}${additionalCovers.toLocaleString("en-GB")} covers across ${baseline.reportingWeeks} reporting weeks (${Math.round(metrics.covers).toLocaleString("en-GB")} total).`
     : `${Math.round(metrics.covers).toLocaleString("en-GB")} covers across ${baseline.reportingWeeks} reporting weeks.`;
+  const moneyInput = (field, value, decimals = 0) => `<div class="executive-scenario__money-field"><span aria-hidden="true">£</span><input type="number" inputmode="decimal" min="0" step="${decimals ? "0.01" : "1"}" data-action="edit-executive-scenario" data-field="${field}" value="${executiveScenarioInputValue(value, decimals)}" /></div>`;
 
   return `<section class="executive-scenario" id="executive-scenario" aria-label="Scenario planner">
     <header class="executive-scenario__heading">
@@ -974,10 +1001,10 @@ function renderExecutiveScenarioPlannerV2(rows) {
         <p class="executive-scenario__group-title">Sales drivers</p>
         <div class="executive-scenario__inputs">
           <label class="executive-scenario__input">
-            <span>How would you like to adjust covers?</span>
+            <span>Adjust covers</span>
             <select data-action="set-executive-scenario-mode" data-field="covers">
-              <option value="total" ${!coversPerWeek ? "selected" : ""}>Set total covers for this period</option>
-              <option value="per-week" ${coversPerWeek ? "selected" : ""}>Add or remove covers per reporting week</option>
+              <option value="total" ${!coversPerWeek ? "selected" : ""}>Set total for period</option>
+              <option value="per-week" ${coversPerWeek ? "selected" : ""}>Add/remove per reporting week</option>
             </select>
           </label>
           <label class="executive-scenario__input">
@@ -987,12 +1014,12 @@ function renderExecutiveScenarioPlannerV2(rows) {
           </label>
           <label class="executive-scenario__input">
             <span>Average spend per head</span>
-            <input type="number" inputmode="decimal" min="0" step="0.01" data-action="edit-executive-scenario" data-field="spendPerHead" value="${executiveScenarioInputValue(scenario.spendPerHead)}" />
+            ${moneyInput("spendPerHead", scenario.spendPerHead, 2)}
             <small>Changing this moves sales in line with the new spend per head.</small>
           </label>
           <label class="executive-scenario__input executive-scenario__input--wide">
             <span>Sales ex VAT target (optional)</span>
-            <input type="number" inputmode="decimal" min="0" step="1" data-action="edit-executive-scenario" data-field="sales" value="${executiveScenarioInputValue(metrics.sales, 0)}" />
+            ${moneyInput("sales", metrics.sales)}
             <small>Use this instead of changing spend per head if you know the sales figure you want to test.</small>
           </label>
         </div>
@@ -1008,10 +1035,24 @@ function renderExecutiveScenarioPlannerV2(rows) {
                 <option value="percentage" ${scenario.grossProfitMode === "percentage" ? "selected" : ""}>% of sales</option>
                 <option value="value" ${scenario.grossProfitMode === "value" ? "selected" : ""}>£ value</option>
               </select>
-              <input type="number" inputmode="decimal" min="0" step="${scenario.grossProfitMode === "value" ? "1" : "0.1"}" data-action="edit-executive-scenario" data-field="grossProfit" value="${executiveScenarioInputValue(gpInput, scenario.grossProfitMode === "value" ? 0 : 1)}" />
+              ${scenario.grossProfitMode === "value" ? moneyInput("grossProfit", gpInput) : `<input type="number" inputmode="decimal" min="0" step="0.1" data-action="edit-executive-scenario" data-field="grossProfit" value="${executiveScenarioInputValue(gpInput, 1)}" />`}
             </div>
             <small>${scenario.grossProfitMode === "value" ? "The £ figure is converted to a GP percentage when sales change." : "Set the gross profit percentage to test."}</small>
           </label>
+          ${baseline.hasFoodDrinkGp ? `<div class="executive-scenario__gp-breakdown">
+            <p>Food &amp; drink GP (optional)</p>
+            <div>
+              <label>
+                <span>Food GP (% of food sales)</span>
+                <input type="number" inputmode="decimal" min="0" step="0.1" data-action="edit-executive-scenario" data-field="foodGrossProfit" value="${executiveScenarioInputValue(scenario.foodGpPercent * 100, 1)}" />
+              </label>
+              <label>
+                <span>Drink GP (% of drink sales)</span>
+                <input type="number" inputmode="decimal" min="0" step="0.1" data-action="edit-executive-scenario" data-field="drinkGrossProfit" value="${executiveScenarioInputValue(scenario.drinkGpPercent * 100, 1)}" />
+              </label>
+            </div>
+            <small>Changing either figure recalculates Overall GP using the current food and drink sales mix.</small>
+          </div>` : ""}
           <label class="executive-scenario__input">
             <span>Total wages</span>
             <div class="executive-scenario__field-row">
@@ -1019,7 +1060,7 @@ function renderExecutiveScenarioPlannerV2(rows) {
                 <option value="percentage" ${scenario.wagesMode === "percentage" ? "selected" : ""}>% of sales</option>
                 <option value="value" ${scenario.wagesMode === "value" ? "selected" : ""}>£ value</option>
               </select>
-              <input type="number" inputmode="decimal" min="0" step="${scenario.wagesMode === "value" ? "1" : "0.1"}" data-action="edit-executive-scenario" data-field="wages" value="${executiveScenarioInputValue(wagesInput, scenario.wagesMode === "value" ? 0 : 1)}" />
+              ${scenario.wagesMode === "value" ? moneyInput("wages", wagesInput) : `<input type="number" inputmode="decimal" min="0" step="0.1" data-action="edit-executive-scenario" data-field="wages" value="${executiveScenarioInputValue(wagesInput, 1)}" />`}
             </div>
             <small>${scenario.wagesMode === "value" ? "The £ figure is converted to a wage percentage when sales change." : "Set total wages as a percentage of sales."}</small>
           </label>
@@ -1034,7 +1075,7 @@ function renderExecutiveScenarioPlannerV2(rows) {
 
     <section class="executive-scenario__results" aria-label="Scenario result">
       <p>What changes</p>
-      <div>${renderExecutiveScenarioResult({ label: "Sales ex VAT", value: metrics.sales, baseline: baseline.sales })}${renderExecutiveScenarioResult({ label: "Total covers", value: metrics.covers, baseline: baseline.covers, kind: "number" })}${renderExecutiveScenarioResult({ label: "Average spend per head", value: metrics.spendPerHead, baseline: baseline.spendPerHead })}${renderExecutiveScenarioResult({ label: "Overall GP", value: metrics.grossProfit, baseline: baseline.grossProfit, supportingText: `${executiveFormat(metrics.grossProfitPercent, "percentage")} of sales` })}${renderExecutiveScenarioResult({ label: "Total wages", value: metrics.wages, baseline: baseline.wages, lowerIsBetter: true, supportingText: `${executiveFormat(metrics.wagesPercent, "percentage")} of sales` })}${renderExecutiveScenarioResult({ label: "GP after wages", value: metrics.gpAfterWages, baseline: baseline.gpAfterWages, supportingText: "Gross profit less total wages" })}</div>
+      <div>${renderExecutiveScenarioResult({ label: "Sales ex VAT", value: metrics.sales, baseline: baseline.sales })}${renderExecutiveScenarioResult({ label: "Total covers", value: metrics.covers, baseline: baseline.covers, kind: "number" })}${renderExecutiveScenarioResult({ label: "Average spend per head", value: metrics.spendPerHead, baseline: baseline.spendPerHead })}${renderExecutiveScenarioResult({ label: "Overall GP", value: metrics.grossProfit, baseline: baseline.grossProfit, supportingText: `${executiveFormat(metrics.grossProfitPercent, "percentage")} of sales` })}${baseline.hasFoodDrinkGp ? renderExecutiveScenarioResult({ label: "Food GP", value: metrics.foodGpPercent, baseline: baseline.foodGpPercent, kind: "percentage", supportingText: "of food sales" }) : ""}${baseline.hasFoodDrinkGp ? renderExecutiveScenarioResult({ label: "Drink GP", value: metrics.drinkGpPercent, baseline: baseline.drinkGpPercent, kind: "percentage", supportingText: "of drink sales" }) : ""}${renderExecutiveScenarioResult({ label: "Total wages", value: metrics.wages, baseline: baseline.wages, lowerIsBetter: true, supportingText: `${executiveFormat(metrics.wagesPercent, "percentage")} of sales` })}${renderExecutiveScenarioResult({ label: "GP after wages", value: metrics.gpAfterWages, baseline: baseline.gpAfterWages, supportingText: "Gross profit less total wages" })}</div>
     </section>
   </section>`;
 }
@@ -1078,12 +1119,21 @@ function applyExecutiveScenario() {
   next.wagesMode = selectedMode("wages") || next.wagesMode;
   const metrics = executiveScenarioMetrics(baseline, next);
   const requestedGrossProfit = read("grossProfit");
+  const requestedFoodGp = read("foodGrossProfit");
+  const requestedDrinkGp = read("drinkGrossProfit");
   const requestedWages = read("wages");
   const displayedGrossProfit = next.grossProfitMode === "value" ? current.grossProfit : current.grossProfitPercent * 100;
   const displayedWages = next.wagesMode === "value" ? current.wages : current.wagesPercent * 100;
   const grossProfitTolerance = next.grossProfitMode === "value" ? .51 : .051;
   const wagesTolerance = next.wagesMode === "value" ? .51 : .051;
-  if (wasEdited("grossProfit") && Number.isFinite(requestedGrossProfit) && requestedGrossProfit >= 0 && Math.abs(requestedGrossProfit - displayedGrossProfit) > grossProfitTolerance) {
+  const foodGpChanged = baseline.hasFoodDrinkGp && wasEdited("foodGrossProfit") && Number.isFinite(requestedFoodGp) && requestedFoodGp >= 0;
+  const drinkGpChanged = baseline.hasFoodDrinkGp && wasEdited("drinkGrossProfit") && Number.isFinite(requestedDrinkGp) && requestedDrinkGp >= 0;
+  if (foodGpChanged || drinkGpChanged) {
+    next.gpCalculationMode = "separate";
+    if (foodGpChanged) next.foodGpPercent = requestedFoodGp / 100;
+    if (drinkGpChanged) next.drinkGpPercent = requestedDrinkGp / 100;
+  } else if (wasEdited("grossProfit") && Number.isFinite(requestedGrossProfit) && requestedGrossProfit >= 0 && Math.abs(requestedGrossProfit - displayedGrossProfit) > grossProfitTolerance) {
+    next.gpCalculationMode = "overall";
     next.grossProfitPercent = next.grossProfitMode === "value" && metrics.sales > 0 ? requestedGrossProfit / metrics.sales : requestedGrossProfit / 100;
   }
   if (wasEdited("wages") && Number.isFinite(requestedWages) && requestedWages >= 0 && Math.abs(requestedWages - displayedWages) > wagesTolerance) {

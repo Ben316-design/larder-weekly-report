@@ -869,6 +869,7 @@ function executiveScenarioBaseline(rows) {
   return {
     sales,
     covers,
+    reportingWeeks: rows.length,
     spendPerHead,
     grossProfit,
     grossProfitPercent: grossProfit / sales,
@@ -882,6 +883,8 @@ function defaultExecutiveScenario(baseline) {
   return {
     periodKey: executiveScenarioKey(),
     covers: baseline.covers,
+    coversMode: "total",
+    coversWeeklyAdjustment: 0,
     spendPerHead: baseline.spendPerHead,
     grossProfitPercent: baseline.grossProfitPercent,
     wagesPercent: baseline.wagesPercent,
@@ -900,14 +903,17 @@ function executiveScenarioForRows(rows) {
 }
 
 function executiveScenarioMetrics(baseline, scenario) {
-  const coverFactor = scenario.covers / baseline.covers;
+  const covers = Math.max(0, scenario.coversMode === "per-week"
+    ? baseline.covers + (scenario.coversWeeklyAdjustment || 0) * baseline.reportingWeeks
+    : scenario.covers);
+  const coverFactor = covers / baseline.covers;
   const spendFactor = scenario.spendPerHead / baseline.spendPerHead;
   const sales = baseline.sales * coverFactor * spendFactor;
   const grossProfit = sales * scenario.grossProfitPercent;
   const wages = sales * scenario.wagesPercent;
   return {
     sales,
-    covers: scenario.covers,
+    covers,
     spendPerHead: scenario.spendPerHead,
     grossProfit,
     grossProfitPercent: scenario.grossProfitPercent,
@@ -938,6 +944,101 @@ function renderExecutiveScenarioPlanner(rows) {
   return `<section class="executive-scenario" id="executive-scenario" aria-label="Scenario planner"><div class="executive-scenario__heading"><div><p class="eyebrow">SCENARIO PLANNER</p><h3>Test a change before it happens</h3><p>Start with the selected period, adjust an assumption, and see the linked sales, margin and wage effect. This does not change the report or your spreadsheet.</p></div><button type="button" data-action="close-executive-scenario">Close</button></div><div class="executive-scenario__inputs"><label>Sales ex VAT<input type="number" inputmode="decimal" min="0" step="1" data-action="edit-executive-scenario" data-field="sales" value="${executiveScenarioInputValue(metrics.sales, 0)}" /><small>Changing sales recalculates spend per head.</small></label><label>Total covers<input type="number" inputmode="numeric" min="0" step="1" data-action="edit-executive-scenario" data-field="covers" value="${executiveScenarioInputValue(scenario.covers, 0)}" /></label><label>Average spend per head<input type="number" inputmode="decimal" min="0" step="0.01" data-action="edit-executive-scenario" data-field="spendPerHead" value="${executiveScenarioInputValue(scenario.spendPerHead)}" /></label><label>Overall GP mode<select data-action="set-executive-scenario-mode" data-field="grossProfit"><option value="percentage" ${scenario.grossProfitMode === "percentage" ? "selected" : ""}>Percentage of sales</option><option value="value" ${scenario.grossProfitMode === "value" ? "selected" : ""}>£ value</option></select><input type="number" inputmode="decimal" min="0" step="${scenario.grossProfitMode === "value" ? "1" : "0.1"}" data-action="edit-executive-scenario" data-field="grossProfit" value="${executiveScenarioInputValue(gpInput, scenario.grossProfitMode === "value" ? 0 : 1)}" /><small>${gpUnit}</small></label><label>Total wages mode<select data-action="set-executive-scenario-mode" data-field="wages"><option value="percentage" ${scenario.wagesMode === "percentage" ? "selected" : ""}>Percentage of sales</option><option value="value" ${scenario.wagesMode === "value" ? "selected" : ""}>£ value</option></select><input type="number" inputmode="decimal" min="0" step="${scenario.wagesMode === "value" ? "1" : "0.1"}" data-action="edit-executive-scenario" data-field="wages" value="${executiveScenarioInputValue(wagesInput, scenario.wagesMode === "value" ? 0 : 1)}" /><small>${wagesUnit}</small></label></div><div class="executive-scenario__footer"><p>Future bookings are intentionally excluded: this is an operating scenario, not a booking forecast.</p><div><button type="button" data-action="apply-executive-scenario">Apply scenario</button><button type="button" data-action="reset-executive-scenario">Reset to selected period</button></div></div><div class="executive-scenario__results"><p>SCENARIO RESULT</p><div>${renderExecutiveScenarioResult({ label: "Sales ex VAT", value: metrics.sales, baseline: baseline.sales })}${renderExecutiveScenarioResult({ label: "Total covers", value: metrics.covers, baseline: baseline.covers, kind: "number" })}${renderExecutiveScenarioResult({ label: "Average spend per head", value: metrics.spendPerHead, baseline: baseline.spendPerHead })}${renderExecutiveScenarioResult({ label: "Overall GP", value: metrics.grossProfit, baseline: baseline.grossProfit, supportingText: `${executiveFormat(metrics.grossProfitPercent, "percentage")} of sales` })}${renderExecutiveScenarioResult({ label: "Total wages", value: metrics.wages, baseline: baseline.wages, lowerIsBetter: true, supportingText: `${executiveFormat(metrics.wagesPercent, "percentage")} of sales` })}${renderExecutiveScenarioResult({ label: "GP after wages", value: metrics.gpAfterWages, baseline: baseline.gpAfterWages, supportingText: "Gross profit less total wages" })}</div></div></section>`;
 }
 
+function renderExecutiveScenarioPlannerV2(rows) {
+  if (!state.executiveScenarioOpen) return "";
+  const { baseline, scenario } = executiveScenarioForRows(rows);
+  if (!baseline || !scenario) return "";
+
+  const metrics = executiveScenarioMetrics(baseline, scenario);
+  const gpInput = scenario.grossProfitMode === "value" ? metrics.grossProfit : metrics.grossProfitPercent * 100;
+  const wagesInput = scenario.wagesMode === "value" ? metrics.wages : metrics.wagesPercent * 100;
+  const coversPerWeek = scenario.coversMode === "per-week";
+  const coversInput = coversPerWeek ? scenario.coversWeeklyAdjustment : scenario.covers;
+  const additionalCovers = Math.round(metrics.covers - baseline.covers);
+  const coversExplanation = coversPerWeek
+    ? `${additionalCovers >= 0 ? "+" : ""}${additionalCovers.toLocaleString("en-GB")} covers across ${baseline.reportingWeeks} reporting weeks (${Math.round(metrics.covers).toLocaleString("en-GB")} total).`
+    : `${Math.round(metrics.covers).toLocaleString("en-GB")} covers across ${baseline.reportingWeeks} reporting weeks.`;
+
+  return `<section class="executive-scenario" id="executive-scenario" aria-label="Scenario planner">
+    <header class="executive-scenario__heading">
+      <div>
+        <p class="eyebrow">SCENARIO PLANNER</p>
+        <h3>Test a change before it happens</h3>
+        <p>Change one or more assumptions for the selected period. The planner recalculates the linked sales, gross profit and wage effect without changing the report or your spreadsheet.</p>
+      </div>
+      <button type="button" data-action="close-executive-scenario">Close</button>
+    </header>
+
+    <div class="executive-scenario__groups">
+      <section class="executive-scenario__group">
+        <p class="executive-scenario__group-title">Sales drivers</p>
+        <div class="executive-scenario__inputs">
+          <label class="executive-scenario__input">
+            <span>How would you like to adjust covers?</span>
+            <select data-action="set-executive-scenario-mode" data-field="covers">
+              <option value="total" ${!coversPerWeek ? "selected" : ""}>Set total covers for this period</option>
+              <option value="per-week" ${coversPerWeek ? "selected" : ""}>Add or remove covers per reporting week</option>
+            </select>
+          </label>
+          <label class="executive-scenario__input">
+            <span>${coversPerWeek ? "Extra covers per reporting week" : "Total covers for this period"}</span>
+            <input type="number" inputmode="numeric" ${coversPerWeek ? "" : "min=\"0\""} step="1" data-action="edit-executive-scenario" data-field="covers" value="${executiveScenarioInputValue(coversInput, 0)}" />
+            <small>${coversExplanation}</small>
+          </label>
+          <label class="executive-scenario__input">
+            <span>Average spend per head</span>
+            <input type="number" inputmode="decimal" min="0" step="0.01" data-action="edit-executive-scenario" data-field="spendPerHead" value="${executiveScenarioInputValue(scenario.spendPerHead)}" />
+            <small>Changing this moves sales in line with the new spend per head.</small>
+          </label>
+          <label class="executive-scenario__input executive-scenario__input--wide">
+            <span>Sales ex VAT target (optional)</span>
+            <input type="number" inputmode="decimal" min="0" step="1" data-action="edit-executive-scenario" data-field="sales" value="${executiveScenarioInputValue(metrics.sales, 0)}" />
+            <small>Use this instead of changing spend per head if you know the sales figure you want to test.</small>
+          </label>
+        </div>
+      </section>
+
+      <section class="executive-scenario__group">
+        <p class="executive-scenario__group-title">Margin &amp; labour</p>
+        <div class="executive-scenario__inputs">
+          <label class="executive-scenario__input">
+            <span>Overall GP</span>
+            <div class="executive-scenario__field-row">
+              <select data-action="set-executive-scenario-mode" data-field="grossProfit">
+                <option value="percentage" ${scenario.grossProfitMode === "percentage" ? "selected" : ""}>% of sales</option>
+                <option value="value" ${scenario.grossProfitMode === "value" ? "selected" : ""}>£ value</option>
+              </select>
+              <input type="number" inputmode="decimal" min="0" step="${scenario.grossProfitMode === "value" ? "1" : "0.1"}" data-action="edit-executive-scenario" data-field="grossProfit" value="${executiveScenarioInputValue(gpInput, scenario.grossProfitMode === "value" ? 0 : 1)}" />
+            </div>
+            <small>${scenario.grossProfitMode === "value" ? "The £ figure is converted to a GP percentage when sales change." : "Set the gross profit percentage to test."}</small>
+          </label>
+          <label class="executive-scenario__input">
+            <span>Total wages</span>
+            <div class="executive-scenario__field-row">
+              <select data-action="set-executive-scenario-mode" data-field="wages">
+                <option value="percentage" ${scenario.wagesMode === "percentage" ? "selected" : ""}>% of sales</option>
+                <option value="value" ${scenario.wagesMode === "value" ? "selected" : ""}>£ value</option>
+              </select>
+              <input type="number" inputmode="decimal" min="0" step="${scenario.wagesMode === "value" ? "1" : "0.1"}" data-action="edit-executive-scenario" data-field="wages" value="${executiveScenarioInputValue(wagesInput, scenario.wagesMode === "value" ? 0 : 1)}" />
+            </div>
+            <small>${scenario.wagesMode === "value" ? "The £ figure is converted to a wage percentage when sales change." : "Set total wages as a percentage of sales."}</small>
+          </label>
+        </div>
+      </section>
+    </div>
+
+    <div class="executive-scenario__footer">
+      <p>Future bookings are excluded: this is an operating scenario, not a booking forecast.</p>
+      <div><button type="button" data-action="apply-executive-scenario">Apply scenario</button><button type="button" data-action="reset-executive-scenario">Reset to selected period</button></div>
+    </div>
+
+    <section class="executive-scenario__results" aria-label="Scenario result">
+      <p>What changes</p>
+      <div>${renderExecutiveScenarioResult({ label: "Sales ex VAT", value: metrics.sales, baseline: baseline.sales })}${renderExecutiveScenarioResult({ label: "Total covers", value: metrics.covers, baseline: baseline.covers, kind: "number" })}${renderExecutiveScenarioResult({ label: "Average spend per head", value: metrics.spendPerHead, baseline: baseline.spendPerHead })}${renderExecutiveScenarioResult({ label: "Overall GP", value: metrics.grossProfit, baseline: baseline.grossProfit, supportingText: `${executiveFormat(metrics.grossProfitPercent, "percentage")} of sales` })}${renderExecutiveScenarioResult({ label: "Total wages", value: metrics.wages, baseline: baseline.wages, lowerIsBetter: true, supportingText: `${executiveFormat(metrics.wagesPercent, "percentage")} of sales` })}${renderExecutiveScenarioResult({ label: "GP after wages", value: metrics.gpAfterWages, baseline: baseline.gpAfterWages, supportingText: "Gross profit less total wages" })}</div>
+    </section>
+  </section>`;
+}
+
 function applyExecutiveScenario() {
   const planner = document.querySelector("#executive-scenario");
   const rows = executiveRowsForWeeks(executivePeriodWeeks());
@@ -948,15 +1049,22 @@ function applyExecutiveScenario() {
   const requestedSales = read("sales");
   const requestedCovers = read("covers");
   const requestedSpend = read("spendPerHead");
+  const coversMode = selectedMode("covers") || scenario.coversMode || "total";
+  const currentCoversInput = coversMode === "per-week" ? scenario.coversWeeklyAdjustment : scenario.covers;
   const current = executiveScenarioMetrics(baseline, scenario);
   const salesChanged = Number.isFinite(requestedSales) && Math.abs(requestedSales - current.sales) > .01;
-  const coversChanged = Number.isFinite(requestedCovers) && Math.abs(requestedCovers - scenario.covers) > .01;
+  const coversChanged = Number.isFinite(requestedCovers) && Math.abs(requestedCovers - currentCoversInput) > .01;
   const spendChanged = Number.isFinite(requestedSpend) && Math.abs(requestedSpend - scenario.spendPerHead) > .001;
   const next = { ...scenario };
-  if (coversChanged && requestedCovers >= 0) next.covers = requestedCovers;
+  next.coversMode = coversMode;
+  if (coversChanged) {
+    if (coversMode === "per-week") next.coversWeeklyAdjustment = requestedCovers;
+    else if (requestedCovers >= 0) next.covers = requestedCovers;
+  }
   if (spendChanged && requestedSpend >= 0) next.spendPerHead = requestedSpend;
-  if (salesChanged && requestedSales >= 0 && next.covers > 0) {
-    next.spendPerHead = baseline.spendPerHead * (requestedSales / baseline.sales) * (baseline.covers / next.covers);
+  const coversAfterChange = executiveScenarioMetrics(baseline, next).covers;
+  if (salesChanged && requestedSales >= 0 && coversAfterChange > 0) {
+    next.spendPerHead = baseline.spendPerHead * (requestedSales / baseline.sales) * (baseline.covers / coversAfterChange);
   }
   next.grossProfitMode = selectedMode("grossProfit") || next.grossProfitMode;
   next.wagesMode = selectedMode("wages") || next.wagesMode;
@@ -1020,7 +1128,7 @@ function renderExecutiveDashboard() {
       ${renderExecutiveKpi({ id: "total-wages", label: "Total wages as % of sales", kind: "percentage", ratio: totalWages, lowerIsBetter: true, rows, comparisonRows })}
       ${renderExecutiveKpi({ id: "future-bookings", label: "Future bookings", key: "futureBookings", kind: "number", aggregate: "sum", basis: "Total bookings recorded in selected period", rows, comparisonRows })}
     </section>
-    ${renderExecutiveScenarioPlanner(rows)}
+    ${renderExecutiveScenarioPlannerV2(rows)}
     ${renderExecutiveMeasureDetail()}
     <section class="executive-dashboard-grid">
       ${renderExecutiveCumulativeChart()}
@@ -2125,6 +2233,7 @@ function attachDynamicListeners() {
     const { baseline, scenario } = executiveScenarioForRows(rows);
     if (!baseline || !scenario) return;
     const next = { ...scenario };
+    if (select.dataset.field === "covers") next.coversMode = select.value;
     if (select.dataset.field === "grossProfit") next.grossProfitMode = select.value;
     if (select.dataset.field === "wages") next.wagesMode = select.value;
     state = { ...state, executiveScenario: next };

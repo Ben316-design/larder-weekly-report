@@ -955,7 +955,8 @@ function executiveScenarioInputValue(value, decimals = 2) {
 
 function renderExecutiveScenarioResult({ label, value, baseline, kind = "currency", lowerIsBetter = false, supportingText = "" }) {
   const trend = executiveTrend(value, baseline, { mode: kind === "percentage" ? "points" : "value", kind, lowerIsBetter, label: "selected period" });
-  return `<article class="executive-scenario__result executive-scenario__result--${trend.tone}"><span>${escapeHtml(label)}</span><strong>${executiveFormat(value, kind)}</strong>${supportingText ? `<small>${escapeHtml(supportingText)}</small>` : ""}<small class="trend trend--${trend.tone}">${escapeHtml(trend.text)}</small></article>`;
+  const compactTrend = trend.tone === "neutral" ? "No change" : trend.text.replace(/\s+vs selected period$/, "");
+  return `<article class="executive-scenario__result executive-scenario__result--${trend.tone}"><span>${escapeHtml(label)}</span><strong>${executiveFormat(value, kind)}</strong>${supportingText ? `<small>${escapeHtml(supportingText)}</small>` : ""}<small class="trend trend--${trend.tone}">${escapeHtml(compactTrend)}</small></article>`;
 }
 
 function renderExecutiveScenarioPlanner(rows) {

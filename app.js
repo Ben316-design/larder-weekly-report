@@ -620,7 +620,6 @@ function executiveComparableRows(weeks) {
     date.setUTCDate(date.getUTCDate() - 364);
     return date.toISOString().slice(0, 10);
   });
-  if (sameWeeksLastYear.some((week) => !Object.prototype.hasOwnProperty.call(entries, week))) return [];
   return executiveRowsForWeeks(sameWeeksLastYear).filter((row) => Object.keys(row).length > 1);
 }
 
@@ -800,15 +799,15 @@ function executiveSameWeekSets() {
   const sets = [];
   for (let yearsBack = 0; yearsBack < 5; yearsBack += 1) {
     const weeks = window.weeks.map((week) => executiveOffsetWeek(week, yearsBack));
-    const rows = weeks.map((week) => Object.prototype.hasOwnProperty.call(entries, week) ? { week, ...entries[week] } : null);
-    if (rows.some((row) => row === null)) break;
+    const rows = weeks.map((week) => Object.prototype.hasOwnProperty.call(entries, week) ? { week, ...entries[week] } : null).filter(Boolean);
+    if (!rows.length) break;
     const year = weeks.at(-1).slice(0, 4);
     const label = yearsBack === 0
       ? window.title
       : window.title === "Latest 13 completed weeks"
         ? `${year} matching 13 weeks`
         : window.title.replace(/\b\d{4}\b/g, year);
-    sets.push({ year, weeks, rows, label });
+    sets.push({ year, weeks, rows, label, availableWeekCount: rows.length, missingWeekCount: window.weeks.length - rows.length });
   }
   return { ...window, sets };
 }
@@ -841,10 +840,11 @@ function renderExecutiveMeasureDetail() {
   const measures = [primary, ...overlays];
   const current = executiveMeasureDisplay(sets[0].rows, primary);
   const overlayOptions = executiveMeasureDefinitions.filter((measure) => measure.id !== primary.id && !overlays.some((overlay) => overlay.id === measure.id));
-  return `<section class="executive-detail" id="executive-detail"><div class="executive-detail__heading"><div><p class="eyebrow">METRIC DETAIL</p><h3>${escapeHtml(current.label)} through time</h3><p>${comparison.fromAllData ? `Using the latest ${comparison.title} window—not the combined all-time total.` : `Using ${comparison.title.toLowerCase()}.`} Each year below covers the same ${comparison.weeks.length} reporting weeks.</p></div><button class="executive-detail__close" type="button" data-action="close-executive-detail">Close</button></div><div class="executive-detail__year-cards">${sets.map((set, index) => {
+  return `<section class="executive-detail" id="executive-detail"><div class="executive-detail__heading"><div><p class="eyebrow">METRIC DETAIL</p><h3>${escapeHtml(current.label)} through time</h3><p>${comparison.fromAllData ? `Using the latest ${comparison.title} window—not the combined all-time total.` : `Using ${comparison.title.toLowerCase()}.`} Comparisons use available matching reporting weeks; coverage is shown on each year.</p></div><button class="executive-detail__close" type="button" data-action="close-executive-detail">Close</button></div><div class="executive-detail__year-cards">${sets.map((set, index) => {
     const display = executiveMeasureDisplay(set.rows, primary);
     const trend = index ? executiveTrend(display.value, current.value, { mode: display.isPercentage ? "points" : "value", kind: display.kind, lowerIsBetter: primary.lowerIsBetter, label: `${sets[0].year} same weeks` }) : null;
-    return `<article class="executive-detail__year ${index === 0 ? "is-current" : ""}"><span>${escapeHtml(set.label)}</span><strong>${executiveFormat(display.value, display.kind)}</strong><small>${index === 0 ? "Current comparison window" : escapeHtml(trend?.text || "No comparable period")}</small></article>`;
+    const coverage = `${set.availableWeekCount} of ${comparison.weeks.length} matching weeks`;
+    return `<article class="executive-detail__year ${index === 0 ? "is-current" : ""}"><span>${escapeHtml(set.label)}</span><strong>${executiveFormat(display.value, display.kind)}</strong><small>${index === 0 ? `${set.availableWeekCount} reporting weeks` : `${escapeHtml(trend?.text || "No comparable period")} · ${coverage}`}</small></article>`;
   }).join("")}</div><div class="executive-detail__controls"><label>Compare years<select data-action="executive-detail-year-scope"><option value="all" ${state.executiveDetailYearScope === "all" ? "selected" : ""}>All comparable years</option><option value="previous" ${state.executiveDetailYearScope === "previous" ? "selected" : ""}>Previous year only</option></select></label><label>Overlay another measure<select data-action="executive-detail-overlay"><option value="">Choose a measure…</option>${overlayOptions.map((measure) => `<option value="${escapeHtml(measure.id)}">${escapeHtml(measure.label)}</option>`).join("")}</select></label>${overlays.length ? `<div class="executive-detail__overlays">${overlays.map((measure) => `<span>${escapeHtml(executiveMeasureDisplay(sets[0].rows, measure).label)}<button type="button" data-action="remove-executive-overlay" data-metric="${escapeHtml(measure.id)}" aria-label="Remove ${escapeHtml(measure.label)}">×</button></span>`).join("")}</div>` : '<p>Select one or more measures to overlay their weekly movement.</p>'}</div>${overlays.length ? `<div class="executive-detail__overlay-figures">${overlays.map((measure) => {
     const display = executiveMeasureDisplay(sets[0].rows, measure);
     const prior = sets[1] ? executiveMeasureDisplay(sets[1].rows, measure) : null;
@@ -867,7 +867,9 @@ function renderExecutiveDashboard() {
     ? "All reporting data is shown together, without a combined year-on-year comparison."
     : comparisonRows.length === rows.length && rows.length
       ? "Card comparisons use the matching reporting weeks from one year earlier."
-      : "No like-for-like prior-year comparison is available for this period.";
+      : comparisonRows.length
+        ? `Prior-year card comparisons use ${comparisonRows.length} of ${rows.length} matching reporting weeks, so they are directional rather than like-for-like.`
+        : "No prior-year reporting weeks are available for this period.";
   const latestThirteen = executiveRows().slice(-13);
   const priorThirteen = executiveRows().slice(-26, -13);
   const forwardSalesTrend = executiveTrend(executiveMetric(latestThirteen, "salesEx", "sum"), executiveMetric(priorThirteen, "salesEx", "sum"), { label: "previous 13 weeks" });

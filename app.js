@@ -53,6 +53,7 @@ let state = {
   executiveMetricModes: {},
   executiveDetailMetric: "",
   executiveDetailOverlays: [],
+  executiveDetailYearScope: "all",
 };
 let expandedTable = null;
 let sharedReportVersion = "";
@@ -522,19 +523,71 @@ function defaultExecutivePeriod() {
   return executiveYears().at(-1) || "all";
 }
 
+function executivePeriodGrain() {
+  if (state.executiveGrain) return state.executiveGrain;
+  if (state.executivePeriod === "latest-13") return "latest-13";
+  if (state.executivePeriod === "all") return "all";
+  return "year";
+}
+
+function executivePeriodOptions(grain = executivePeriodGrain()) {
+  const weeks = executiveRows().map((row) => row.week);
+  if (grain === "year") return executiveYears().map((year) => ({ value: year, label: `Calendar year ${year}` }));
+  if (grain === "quarter") {
+    return [...new Set(weeks.map((week) => {
+      const [year, month] = week.split("-").map(Number);
+      return `${year}-Q${Math.floor((month - 1) / 3) + 1}`;
+    }))].sort().map((value) => {
+      const [year, quarter] = value.split("-Q");
+      return { value, label: `Q${quarter} ${year}` };
+    });
+  }
+  if (grain === "month") {
+    return [...new Set(weeks.map((week) => week.slice(0, 7)))].sort().map((value) => ({ value, label: monthTitle(value) }));
+  }
+  return [];
+}
+
+function executiveSelectedPeriod() {
+  const grain = executivePeriodGrain();
+  if (grain === "latest-13") return "latest-13";
+  if (grain === "all") return "all";
+  const options = executivePeriodOptions(grain);
+  return options.some((option) => option.value === state.executivePeriod) ? state.executivePeriod : options.at(-1)?.value || defaultExecutivePeriod();
+}
+
+function defaultExecutivePeriodForGrain(grain) {
+  if (grain === "latest-13" || grain === "all") return grain;
+  return executivePeriodOptions(grain).at(-1)?.value || defaultExecutivePeriod();
+}
+
 function executivePeriodWeeks() {
   const allWeeks = executiveRows().map((row) => row.week);
-  const period = state.executivePeriod || defaultExecutivePeriod();
-  if (period === "latest-13") return allWeeks.slice(-13);
-  if (period === "all") return allWeeks;
+  const grain = executivePeriodGrain();
+  const period = executiveSelectedPeriod();
+  if (grain === "latest-13") return allWeeks.slice(-13);
+  if (grain === "all") return allWeeks;
+  if (grain === "month") return allWeeks.filter((week) => week.startsWith(`${period}-`));
+  if (grain === "quarter") return allWeeks.filter((week) => {
+    const [year, quarter] = period.split("-Q");
+    const month = Number(week.slice(5, 7));
+    return week.startsWith(`${year}-`) && Math.floor((month - 1) / 3) + 1 === Number(quarter);
+  });
   return allWeeks.filter((week) => week.startsWith(`${period}-`));
 }
 
 function executivePeriodTitle() {
-  const period = state.executivePeriod || defaultExecutivePeriod();
-  if (period === "latest-13") return "Latest 13 weeks";
-  if (period === "all") return "All available weeks";
-  return `${period} to date`;
+  const grain = executivePeriodGrain();
+  const period = executiveSelectedPeriod();
+  if (grain === "latest-13") return "Latest 13 completed weeks";
+  if (grain === "all") return "All available data";
+  if (grain === "month") return monthTitle(period);
+  if (grain === "quarter") {
+    const [year, quarter] = period.split("-Q");
+    return `Q${quarter} ${year}`;
+  }
+  if (period === executiveYears().at(-1)) return `${period} reporting year to date`;
+  return `Calendar year ${period}`;
 }
 
 function executiveValue(row, key) {
@@ -567,6 +620,7 @@ function executiveComparableRows(weeks) {
     date.setUTCDate(date.getUTCDate() - 364);
     return date.toISOString().slice(0, 10);
   });
+  if (sameWeeksLastYear.some((week) => !Object.prototype.hasOwnProperty.call(entries, week))) return [];
   return executiveRowsForWeeks(sameWeeksLastYear).filter((row) => Object.keys(row).length > 1);
 }
 
@@ -726,10 +780,9 @@ function executiveMeasureDisplay(rows, measure) {
 
 function executiveDetailWindow() {
   const allWeeks = executiveRows().map((row) => row.week);
-  const period = state.executivePeriod || defaultExecutivePeriod();
-  if (period === "all") {
+  if (executivePeriodGrain() === "all") {
     const latestYear = allWeeks.at(-1)?.slice(0, 4);
-    return { weeks: allWeeks.filter((week) => week.startsWith(`${latestYear}-`)), title: `${latestYear} to date`, fromAllData: true };
+    return { weeks: allWeeks.filter((week) => week.startsWith(`${latestYear}-`)), title: `${latestYear} reporting year to date`, fromAllData: true };
   }
   return { weeks: executivePeriodWeeks(), title: executivePeriodTitle(), fromAllData: false };
 }
@@ -750,7 +803,12 @@ function executiveSameWeekSets() {
     const rows = weeks.map((week) => Object.prototype.hasOwnProperty.call(entries, week) ? { week, ...entries[week] } : null);
     if (rows.some((row) => row === null)) break;
     const year = weeks.at(-1).slice(0, 4);
-    sets.push({ year, weeks, rows, label: yearsBack === 0 ? window.title : window.title === "Latest 13 weeks" ? `${year} same 13 weeks` : `${year} to date` });
+    const label = yearsBack === 0
+      ? window.title
+      : window.title === "Latest 13 completed weeks"
+        ? `${year} matching 13 weeks`
+        : window.title.replace(/\b\d{4}\b/g, year);
+    sets.push({ year, weeks, rows, label });
   }
   return { ...window, sets };
 }
@@ -777,7 +835,7 @@ function renderExecutiveMeasureDetail() {
   const primary = executiveMeasureDefinition(state.executiveDetailMetric);
   if (!primary) return "";
   const comparison = executiveSameWeekSets();
-  const sets = comparison.sets;
+  const sets = state.executiveDetailYearScope === "previous" ? comparison.sets.slice(0, 2) : comparison.sets;
   if (!sets.length) return "";
   const overlays = (state.executiveDetailOverlays || []).map(executiveMeasureDefinition).filter(Boolean).filter((measure) => measure.id !== primary.id);
   const measures = [primary, ...overlays];
@@ -787,7 +845,7 @@ function renderExecutiveMeasureDetail() {
     const display = executiveMeasureDisplay(set.rows, primary);
     const trend = index ? executiveTrend(display.value, current.value, { mode: display.isPercentage ? "points" : "value", kind: display.kind, lowerIsBetter: primary.lowerIsBetter, label: `${sets[0].year} same weeks` }) : null;
     return `<article class="executive-detail__year ${index === 0 ? "is-current" : ""}"><span>${escapeHtml(set.label)}</span><strong>${executiveFormat(display.value, display.kind)}</strong><small>${index === 0 ? "Current comparison window" : escapeHtml(trend?.text || "No comparable period")}</small></article>`;
-  }).join("")}</div><div class="executive-detail__controls"><label>Overlay another measure<select data-action="executive-detail-overlay"><option value="">Choose a measure…</option>${overlayOptions.map((measure) => `<option value="${escapeHtml(measure.id)}">${escapeHtml(measure.label)}</option>`).join("")}</select></label>${overlays.length ? `<div class="executive-detail__overlays">${overlays.map((measure) => `<span>${escapeHtml(executiveMeasureDisplay(sets[0].rows, measure).label)}<button type="button" data-action="remove-executive-overlay" data-metric="${escapeHtml(measure.id)}" aria-label="Remove ${escapeHtml(measure.label)}">×</button></span>`).join("")}</div>` : '<p>Select one or more measures to overlay their weekly movement.</p>'}</div>${overlays.length ? `<div class="executive-detail__overlay-figures">${overlays.map((measure) => {
+  }).join("")}</div><div class="executive-detail__controls"><label>Compare years<select data-action="executive-detail-year-scope"><option value="all" ${state.executiveDetailYearScope === "all" ? "selected" : ""}>All comparable years</option><option value="previous" ${state.executiveDetailYearScope === "previous" ? "selected" : ""}>Previous year only</option></select></label><label>Overlay another measure<select data-action="executive-detail-overlay"><option value="">Choose a measure…</option>${overlayOptions.map((measure) => `<option value="${escapeHtml(measure.id)}">${escapeHtml(measure.label)}</option>`).join("")}</select></label>${overlays.length ? `<div class="executive-detail__overlays">${overlays.map((measure) => `<span>${escapeHtml(executiveMeasureDisplay(sets[0].rows, measure).label)}<button type="button" data-action="remove-executive-overlay" data-metric="${escapeHtml(measure.id)}" aria-label="Remove ${escapeHtml(measure.label)}">×</button></span>`).join("")}</div>` : '<p>Select one or more measures to overlay their weekly movement.</p>'}</div>${overlays.length ? `<div class="executive-detail__overlay-figures">${overlays.map((measure) => {
     const display = executiveMeasureDisplay(sets[0].rows, measure);
     const prior = sets[1] ? executiveMeasureDisplay(sets[1].rows, measure) : null;
     const trend = prior ? executiveTrend(display.value, prior.value, { mode: display.isPercentage ? "points" : "value", kind: display.kind, lowerIsBetter: measure.lowerIsBetter, label: `${sets[1].year} same weeks` }) : null;
@@ -798,11 +856,18 @@ function renderExecutiveMeasureDetail() {
 function renderExecutiveDashboard() {
   const allRows = executiveRows();
   if (!allRows.length) return `<section class="executive-page"><button class="back-link" type="button" data-section="hub">&larr; Information Hub</button><div class="page-intro"><p class="eyebrow">EXECUTIVE DASHBOARD</p><h2>Business trajectory</h2><p>Upload the full Master Performance Sheet to prepare the long-term dashboard.</p></div></section>`;
-  const years = executiveYears();
+  const grain = executivePeriodGrain();
+  const selectedPeriod = executiveSelectedPeriod();
+  const periodOptions = executivePeriodOptions(grain);
   const weeks = executivePeriodWeeks();
   const rows = executiveRowsForWeeks(weeks);
-  const showingAllAvailableData = (state.executivePeriod || defaultExecutivePeriod()) === "all";
+  const showingAllAvailableData = grain === "all";
   const comparisonRows = showingAllAvailableData ? [] : executiveComparableRows(weeks);
+  const comparisonNote = showingAllAvailableData
+    ? "All reporting data is shown together, without a combined year-on-year comparison."
+    : comparisonRows.length === rows.length && rows.length
+      ? "Card comparisons use the matching reporting weeks from one year earlier."
+      : "No like-for-like prior-year comparison is available for this period.";
   const latestThirteen = executiveRows().slice(-13);
   const priorThirteen = executiveRows().slice(-26, -13);
   const forwardSalesTrend = executiveTrend(executiveMetric(latestThirteen, "salesEx", "sum"), executiveMetric(priorThirteen, "salesEx", "sum"), { label: "previous 13 weeks" });
@@ -820,7 +885,7 @@ function renderExecutiveDashboard() {
   return `<section class="executive-page">
     <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
     <div class="executive-hero"><p class="eyebrow">LARDER EXECUTIVE DASHBOARD</p><h2>Business trajectory</h2><p>See how volume, value, margin and labour have moved together—and which indicators are shaping the next few months.</p><img class="executive-hero__logo" src="./assets/larder-logo.png" alt="Larder Brasserie and Grill" /></div>
-    <section class="executive-controls" aria-label="Executive dashboard period"><label>Reporting period<select data-action="executive-period"><option value="latest-13" ${(state.executivePeriod || defaultExecutivePeriod()) === "latest-13" ? "selected" : ""}>Latest 13 weeks</option><option value="all" ${(state.executivePeriod || defaultExecutivePeriod()) === "all" ? "selected" : ""}>All available data</option>${years.map((year) => `<option value="${year}" ${(state.executivePeriod || defaultExecutivePeriod()) === year ? "selected" : ""}>${year} to date</option>`).join("")}</select></label><p><strong>${escapeHtml(executivePeriodTitle())}</strong><span>${rows.length} reporting weeks · sourced from the full Master Performance Sheet</span></p></section>
+    <section class="executive-controls" aria-label="Executive dashboard period"><label>View by<select data-action="executive-grain"><option value="month" ${grain === "month" ? "selected" : ""}>Month</option><option value="quarter" ${grain === "quarter" ? "selected" : ""}>Quarter</option><option value="year" ${grain === "year" ? "selected" : ""}>Calendar year</option><option value="latest-13" ${grain === "latest-13" ? "selected" : ""}>Latest 13 weeks</option><option value="all" ${grain === "all" ? "selected" : ""}>All available data</option></select></label>${periodOptions.length ? `<label>Period<select data-action="executive-period">${periodOptions.map((option) => `<option value="${escapeHtml(option.value)}" ${selectedPeriod === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select></label>` : ""}<p><strong>${escapeHtml(executivePeriodTitle())}</strong><span>${rows.length} reporting weeks · ${comparisonNote}</span></p></section>
     <section class="executive-kpis" aria-label="Executive key performance indicators">
       ${renderExecutiveKpi({ id: "sales-ex", label: "Sales ex VAT", key: "salesEx", kind: "currency", aggregate: "sum", basis: "Total for selected period", valueToggle: true, valueToggleLabel: "£ change", rows, comparisonRows })}
       ${renderExecutiveKpi({ id: "total-covers", label: "Total covers", key: "covers", kind: "number", aggregate: "sum", basis: "Total covers in selected period", rows, comparisonRows })}
@@ -1834,7 +1899,7 @@ async function signOut() {
   localPreviewModel = null;
   sharedReportVersion = "";
   lastActivityKey = "";
-  state = { section: "hub", week: "", sourceName: "", isUploaded: false, authMode: "login", authMessage: "You have signed out.", authToken: "", user: null, access: null, adminUsers: null, adminMessage: "", availableWeeks: [], taskData: null, taskMessage: "", menuMode: "report", executive: null, executivePeriod: "", executiveMetricModes: {}, executiveDetailMetric: "", executiveDetailOverlays: [] };
+  state = { section: "hub", week: "", sourceName: "", isUploaded: false, authMode: "login", authMessage: "You have signed out.", authToken: "", user: null, access: null, adminUsers: null, adminMessage: "", availableWeeks: [], taskData: null, taskMessage: "", menuMode: "report", executive: null, executivePeriod: "", executiveMetricModes: {}, executiveDetailMetric: "", executiveDetailOverlays: [], executiveDetailYearScope: "all" };
   updateTaskBadge(0);
   render();
 }
@@ -1897,8 +1962,13 @@ function attachDynamicListeners() {
     render();
   }));
   document.querySelectorAll("[data-action='choose-calendar-week']").forEach((button) => button.addEventListener("click", () => { void changeReportWeek(button.dataset.week); }));
+  document.querySelectorAll("[data-action='executive-grain']").forEach((select) => select.addEventListener("change", () => {
+    const grain = select.value;
+    state = { ...state, executiveGrain: grain, executivePeriod: defaultExecutivePeriodForGrain(grain), executiveDetailMetric: "", executiveDetailOverlays: [] };
+    render();
+  }));
   document.querySelectorAll("[data-action='executive-period']").forEach((select) => select.addEventListener("change", () => {
-    state = { ...state, executivePeriod: select.value };
+    state = { ...state, executivePeriod: select.value, executiveDetailMetric: "", executiveDetailOverlays: [] };
     render();
   }));
   document.querySelectorAll("[data-action='toggle-executive-value']").forEach((button) => button.addEventListener("click", () => {
@@ -1913,7 +1983,7 @@ function attachDynamicListeners() {
     const openDetail = () => {
       const metric = card.dataset.metric;
       if (!metric) return;
-      state = { ...state, executiveDetailMetric: metric, executiveDetailOverlays: [] };
+      state = { ...state, executiveDetailMetric: metric, executiveDetailOverlays: [], executiveDetailYearScope: "all" };
       render();
       document.querySelector("#executive-detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
     };
@@ -1929,13 +1999,17 @@ function attachDynamicListeners() {
     });
   });
   document.querySelectorAll("[data-action='close-executive-detail']").forEach((button) => button.addEventListener("click", () => {
-    state = { ...state, executiveDetailMetric: "", executiveDetailOverlays: [] };
+    state = { ...state, executiveDetailMetric: "", executiveDetailOverlays: [], executiveDetailYearScope: "all" };
     render();
   }));
   document.querySelectorAll("[data-action='executive-detail-overlay']").forEach((select) => select.addEventListener("change", () => {
     const metric = select.value;
     if (!metric || (state.executiveDetailOverlays || []).includes(metric)) return;
     state = { ...state, executiveDetailOverlays: [...(state.executiveDetailOverlays || []), metric].slice(0, 3) };
+    render();
+  }));
+  document.querySelectorAll("[data-action='executive-detail-year-scope']").forEach((select) => select.addEventListener("change", () => {
+    state = { ...state, executiveDetailYearScope: select.value };
     render();
   }));
   document.querySelectorAll("[data-action='remove-executive-overlay']").forEach((button) => button.addEventListener("click", () => {

@@ -23,6 +23,7 @@ const uploadInput = document.querySelector("#weekly-report-input");
 const budgetInput = document.querySelector("#budget-input");
 
 const sharedReportEndpoint = "/.netlify/functions/report";
+const budgetEndpoint = "/.netlify/functions/budget";
 const authEndpoint = "/.netlify/functions/auth";
 const adminEndpoint = "/.netlify/functions/admin";
 const tasksEndpoint = "/.netlify/functions/tasks";
@@ -63,6 +64,7 @@ let state = {
   profitPlanMessage: "",
   profitPlanReviewMonth: "",
   profitPlanBudget: null,
+  profitPlanBudgets: {},
   overviewPaceOpen: false,
   budgetSalesAssumptions: {},
   budgetSalesExpandedMonth: "",
@@ -1340,11 +1342,13 @@ function profitPlanYears() {
   return [...new Set([
     ...executiveRows().map((row) => profitPlanAccountingYear(row.week)),
     state.profitPlanBudget?.financialYear,
+    ...Object.keys(state.profitPlanBudgets || {}),
     localAccountantBudget?.financialYear,
   ].filter(Boolean))].sort();
 }
 
 function profitPlanBudgetForYear(year) {
+  if (state.profitPlanBudgets?.[year]?.financialYear === year) return state.profitPlanBudgets[year];
   if (state.profitPlanBudget?.financialYear === year) return state.profitPlanBudget;
   return localAccountantBudget?.financialYear === year ? localAccountantBudget : null;
 }
@@ -1514,9 +1518,9 @@ function renderProfitPlanBudgetUpload(year) {
   const budget = profitPlanBudgetForYear(year);
   const source = budget ? `<p class="profit-budget-upload__source"><strong>Loaded:</strong> ${escapeHtml(budget.sourceLabel)}<br><span>${escapeHtml(budget.financialYear)} · ${escapeHtml(budget.periodLabel)}</span></p>` : "";
   return `<section class="profit-budget-upload" aria-label="Budget upload">
-    <div><p class="eyebrow">BUDGET FILE</p><h3>Update the financial plan</h3><p>Drag in the Excel budget. We read the 12 monthly P&amp;L values and use them only in this local Profit Plan preview.</p>${source}</div>
+    <div><p class="eyebrow">BUDGET FILE</p><h3>Update the financial plan</h3><p>Drag in the Excel budget. We read the 12 monthly P&amp;L values and securely share the plan with Owners and Admins.</p>${source}</div>
     <button class="profit-budget-upload__drop" type="button" data-action="choose-budget-upload"><span aria-hidden="true">⇧</span><strong>Drop the budget here</strong><small>or choose an Excel file</small></button>
-    <p class="profit-budget-upload__note">Looks for a May–April budget with Total Turnover, Gross Profit, Total Labour Cost and Operating Profit. This does not replace or publish the weekly Master Sheet.</p>
+    <p class="profit-budget-upload__note">Looks for a May–April budget with Total Turnover, Gross Profit, Total Labour Cost and Operating Profit. The extracted budget figures are stored securely; this does not replace or publish the weekly Master Sheet.</p>
   </section>`;
 }
 
@@ -2000,7 +2004,8 @@ function renderProfitImprovementPlan() {
     <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
     <div class="profit-plan-hero"><p class="eyebrow">BUDGET &amp; TARGETS</p><h2>Lay out the budget, properly.</h2><p>Start with the annual sales plan, turn it into monthly and weekly targets, then build the rest of the budget from the same clear structure.</p></div>
     <section class="profit-plan-controls"><label>Financial year<select data-action="profit-plan-year">${years.map((item) => `<option value="${item}" ${item === year ? "selected" : ""}>${item} · May–April</option>`).join("")}</select></label><p><strong>${escapeHtml(year)} budget</strong><span>${yearRows.length} reporting weeks loaded from the Master Performance Sheet</span></p></section>
-    <p class="profit-plan-local-note"><strong>Local prototype:</strong> the budget file and planning adjustments are visible only in this local preview. They are not published yet.</p>
+    <p class="profit-plan-local-note"><strong>Shared budget:</strong> uploaded budget figures and planning adjustments are available to Owners and Admins. This does not alter the weekly Master Sheet.</p>
+    ${renderSensitiveAccessCheck()}
     ${state.profitPlanMessage ? `<p class="profit-plan-message">${escapeHtml(state.profitPlanMessage)}</p>` : ""}
     ${renderProfitPlanBudgetUpload(year)}
     ${renderProfitPlanBudget(year)}
@@ -2686,6 +2691,7 @@ async function beginSignedInExperience() {
       if (!reportPolling) reportPolling = window.setInterval(() => { if (!state.previewUser) void loadSharedReport({ renderAfterLoad: true, week: report?.selectedWeek || "" }); }, sharedReportPollInterval);
       return;
     }
+    if (state.access?.canManageUsers) await loadSharedBudget(profitPlanAccountingYear(report?.selectedWeek || state.executive?.currentWeek || ""));
     state = { ...state, authMode: "authenticated", section: requestedStartSection(), authMessage: "" };
     void loadTasks({ renderAfterLoad: false });
     render();
@@ -3098,7 +3104,7 @@ async function signOut() {
   localPreviewModel = null;
   sharedReportVersion = "";
   lastActivityKey = "";
-  state = { section: "hub", week: "", sourceName: "", isUploaded: false, authMode: "login", authMessage: "You have signed out.", authToken: "", user: null, access: null, adminUsers: null, adminMessage: "", availableWeeks: [], taskData: null, taskMessage: "", menuMode: "report", executive: null, executivePeriod: "", executiveMetricModes: {}, executiveDetailMetric: "", executiveDetailYearScope: "all", executiveScenarioOpen: false, executiveScenario: null, profitPlans: {}, profitPlanYear: "", profitPlanMessage: "", profitPlanReviewMonth: "", profitPlanBudget: null, overviewPaceOpen: false, budgetSalesAssumptions: {}, budgetSalesExpandedMonth: "", budgetSalesDetailMonth: "", budgetSalesProjectionMonth: "", budgetSalesWeekProjectionMonth: "" };
+  state = { section: "hub", week: "", sourceName: "", isUploaded: false, authMode: "login", authMessage: "You have signed out.", authToken: "", user: null, access: null, adminUsers: null, adminMessage: "", availableWeeks: [], taskData: null, taskMessage: "", menuMode: "report", executive: null, executivePeriod: "", executiveMetricModes: {}, executiveDetailMetric: "", executiveDetailYearScope: "all", executiveScenarioOpen: false, executiveScenario: null, profitPlans: {}, profitPlanYear: "", profitPlanMessage: "", profitPlanReviewMonth: "", profitPlanBudget: null, profitPlanBudgets: {}, overviewPaceOpen: false, budgetSalesAssumptions: {}, budgetSalesExpandedMonth: "", budgetSalesDetailMonth: "", budgetSalesProjectionMonth: "", budgetSalesWeekProjectionMonth: "" };
   updateTaskBadge(0);
   render();
 }
@@ -3264,6 +3270,7 @@ function attachDynamicListeners() {
   document.querySelectorAll("[data-action='profit-plan-year']").forEach((select) => select.addEventListener("change", () => {
     state = { ...state, profitPlanYear: select.value, profitPlanReviewMonth: "", profitPlanMessage: "", budgetSalesExpandedMonth: "", budgetSalesDetailMonth: "", budgetSalesProjectionMonth: "", budgetSalesWeekProjectionMonth: "" };
     render();
+    void loadSharedBudget(select.value, { renderAfterLoad: true });
   }));
   document.querySelectorAll("[data-action='choose-budget-upload']").forEach((button) => {
     button.addEventListener("click", () => budgetInput?.click());
@@ -3296,9 +3303,10 @@ function attachDynamicListeners() {
     state = {
       ...state,
       budgetSalesAssumptions: { ...(state.budgetSalesAssumptions || {}), [year]: yearAssumptions },
-      profitPlanMessage: "Sales plan updated locally.",
+      profitPlanMessage: localPreviewMode ? "Sales plan updated locally." : "Saving sales plan for everyone…",
     };
     render();
+    void saveSharedBudgetAssumptions(year, yearAssumptions);
     };
     // Keep the field stable while someone is typing. Saving on every keystroke
     // re-renders the page and can interrupt a covers or SPH edit on mobile.
@@ -3347,9 +3355,10 @@ function attachDynamicListeners() {
       budgetSalesDetailMonth: "",
       budgetSalesProjectionMonth: "",
       budgetSalesWeekProjectionMonth: "",
-      profitPlanMessage: "Sales plan reset to the budget and last-year inc-VAT SPH.",
+      profitPlanMessage: localPreviewMode ? "Sales plan reset to the budget and last-year inc-VAT SPH." : "Returning sales plan to the shared budget…",
     };
     render();
+    void saveSharedBudgetAssumptions(year, {});
   }));
   document.querySelectorAll("[data-action='reset-budget-sales-month']").forEach((button) => button.addEventListener("click", () => {
     const year = profitPlanSelectedYear();
@@ -3362,9 +3371,10 @@ function attachDynamicListeners() {
       budgetSalesAssumptions: { ...(state.budgetSalesAssumptions || {}), [year]: yearAssumptions },
       budgetSalesProjectionMonth: "",
       budgetSalesWeekProjectionMonth: "",
-      profitPlanMessage: `${monthTitle(month)} targets returned to the adjusted budget.`,
+      profitPlanMessage: localPreviewMode ? `${monthTitle(month)} targets returned to the adjusted budget.` : "Returning this month to the shared budget…",
     };
     render();
+    void saveSharedBudgetAssumptions(year, yearAssumptions);
   }));
   document.querySelectorAll("[data-profit-plan-form='summary']").forEach((form) => form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -3668,6 +3678,86 @@ async function publishSharedReport(submission, sourceName) {
   return payload;
 }
 
+function isSharedBudgetPayload(payload) {
+  const budget = payload?.budget;
+  return Boolean(budget?.financialYear && Array.isArray(budget.months) && budget.months.length === 12 && budget.annual);
+}
+
+function applySharedBudget(payload, { renderAfterLoad = false } = {}) {
+  if (!isSharedBudgetPayload(payload)) return false;
+  const budget = payload.budget;
+  const year = budget.financialYear;
+  state = {
+    ...state,
+    profitPlanBudget: budget,
+    profitPlanBudgets: { ...(state.profitPlanBudgets || {}), [year]: budget },
+    budgetSalesAssumptions: { ...(state.budgetSalesAssumptions || {}), [year]: payload.assumptions || {} },
+  };
+  if (renderAfterLoad) render();
+  return true;
+}
+
+async function loadSharedBudget(year, { renderAfterLoad = false } = {}) {
+  if (localPreviewMode || location.protocol !== "https:" || !canManageUsers() || !year) return false;
+  try {
+    const response = await fetch(`${budgetEndpoint}?year=${encodeURIComponent(year)}`, { cache: "no-store", headers: { Accept: "application/json" } });
+    if (response.status === 404) return false;
+    if (response.status === 401) {
+      if (isSignedIn()) await signOut();
+      return false;
+    }
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "The shared budget could not be loaded.");
+    return applySharedBudget(payload, { renderAfterLoad });
+  } catch (error) {
+    console.warn("The shared budget could not be loaded.", error);
+    if (renderAfterLoad && state.profitPlanYear === year) {
+      state = { ...state, profitPlanMessage: error.message || "The shared budget could not be loaded." };
+      render();
+    }
+    return false;
+  }
+}
+
+async function publishSharedBudget(budget, sourceName) {
+  const response = await fetch(budgetEndpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "save-budget", budget, sourceName }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (response.status === 428) throw new Error("Confirm your own account password on this page before updating the shared budget.");
+  if (response.status === 401) throw new Error("Your sign-in has expired. Please sign in again.");
+  if (!response.ok) throw new Error(payload.error || "The budget could not be saved for everyone.");
+  if (!isSharedBudgetPayload(payload)) throw new Error("The budget was saved, but its confirmation was incomplete.");
+  return payload;
+}
+
+async function saveSharedBudgetAssumptions(year, assumptions) {
+  if (localPreviewMode || location.protocol !== "https:" || !canManageUsers() || !year) return;
+  try {
+    const response = await fetch(budgetEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "save-assumptions", financialYear: year, assumptions }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (response.status === 428) throw new Error("Confirm your own account password on this page before changing the shared sales plan.");
+    if (!response.ok) throw new Error(payload.error || "The shared sales plan could not be saved.");
+    applySharedBudget(payload);
+    if (state.profitPlanYear === year) {
+      state = { ...state, profitPlanMessage: "Sales plan saved for everyone." };
+      render();
+    }
+  } catch (error) {
+    console.error(error);
+    if (state.profitPlanYear === year) {
+      state = { ...state, profitPlanMessage: error.message || "The shared sales plan could not be saved." };
+      render();
+    }
+  }
+}
+
 async function handleUpload(files) {
   const file = files?.[0];
   if (!file) return;
@@ -3848,11 +3938,6 @@ function accountantBudgetFromWorkbook(workbook, sourceName) {
 async function handleBudgetUpload(files) {
   const file = files?.[0];
   if (!file) return;
-  if (!localPreviewMode) {
-    state = { ...state, profitPlanMessage: "Budget upload is being tested in the local preview. The live version will use secure shared storage." };
-    render();
-    return;
-  }
   if (!/\.(xlsx|xlsm|xls)$/i.test(file.name)) {
     state = { ...state, profitPlanMessage: "Please choose an Excel .xlsx, .xlsm or .xls budget file." };
     render();
@@ -3863,22 +3948,44 @@ async function handleBudgetUpload(files) {
     render();
     return;
   }
-  state = { ...state, profitPlanMessage: "Reading the accountant budget…" };
+  if (!localPreviewMode && !canManageUsers()) {
+    state = { ...state, profitPlanMessage: "Only an Administrator or Owner can update the shared budget." };
+    render();
+    return;
+  }
+  state = { ...state, profitPlanMessage: "Reading the budget…" };
   render();
   try {
     const workbook = window.XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
     const budget = accountantBudgetFromWorkbook(workbook, file.name);
-    state = {
-      ...state,
-      profitPlanBudget: budget,
-      profitPlanYear: budget.financialYear,
-      budgetSalesAssumptions: { ...(state.budgetSalesAssumptions || {}), [budget.financialYear]: {} },
-      budgetSalesExpandedMonth: "",
-      budgetSalesDetailMonth: "",
-      budgetSalesProjectionMonth: "",
-      budgetSalesWeekProjectionMonth: "",
-      profitPlanMessage: `${budget.financialYear} budget loaded locally. Review the sales plan and adjust monthly covers or spend per head if needed.`,
-    };
+    if (localPreviewMode) {
+      state = {
+        ...state,
+        profitPlanBudget: budget,
+        profitPlanBudgets: { ...(state.profitPlanBudgets || {}), [budget.financialYear]: budget },
+        profitPlanYear: budget.financialYear,
+        budgetSalesAssumptions: { ...(state.budgetSalesAssumptions || {}), [budget.financialYear]: {} },
+        budgetSalesExpandedMonth: "",
+        budgetSalesDetailMonth: "",
+        budgetSalesProjectionMonth: "",
+        budgetSalesWeekProjectionMonth: "",
+        profitPlanMessage: `${budget.financialYear} budget loaded locally. Review the sales plan and adjust monthly covers or spend per head if needed.`,
+      };
+    } else {
+      state = { ...state, profitPlanMessage: "Saving the shared budget…" };
+      render();
+      const saved = await publishSharedBudget(budget, file.name);
+      applySharedBudget(saved);
+      state = {
+        ...state,
+        profitPlanYear: saved.budget.financialYear,
+        budgetSalesExpandedMonth: "",
+        budgetSalesDetailMonth: "",
+        budgetSalesProjectionMonth: "",
+        budgetSalesWeekProjectionMonth: "",
+        profitPlanMessage: `${saved.budget.financialYear} budget saved securely for Owners and Admins.`,
+      };
+    }
   } catch (error) {
     console.error(error);
     state = { ...state, profitPlanMessage: error.message || "The accountant budget could not be read." };

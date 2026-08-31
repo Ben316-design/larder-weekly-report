@@ -35,6 +35,7 @@ The app stores the report centrally and automatically refreshes open reports wit
 
 - `app.js` — protected report interface and workbook reader.
 - `netlify/functions/report.mjs` — serves a filtered report and publishes weekly uploads.
+- `netlify/functions/budget.mjs` — stores the extracted May–April budget and shared sales-plan adjustments for Owners and Admins.
 - `netlify/functions/auth.mjs` — verifies identity and sensitive-action confirmation.
 - `netlify/functions/admin.mjs` — Admin Control Centre user and permission management.
 - `netlify/functions/access.mjs` — stores section permissions and roles.

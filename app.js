@@ -56,6 +56,10 @@ let state = {
   executiveDetailYearScope: "all",
   executiveScenarioOpen: false,
   executiveScenario: null,
+  profitPlans: {},
+  profitPlanYear: "",
+  profitPlanMessage: "",
+  profitPlanReviewMonth: "",
 };
 let expandedTable = null;
 let sharedReportVersion = "";
@@ -353,6 +357,10 @@ function canViewExecutiveDashboard() {
   return canManageUsers() && !state.previewUser;
 }
 
+function canViewProfitPlan() {
+  return canViewExecutiveDashboard();
+}
+
 function renderAuthScreen() {
   const message = state.authMessage ? `<p class="auth-message">${escapeHtml(state.authMessage)}</p>` : "";
   if (state.authMode === "loading") {
@@ -415,6 +423,11 @@ function renderHub() {
       ${canViewExecutiveDashboard() ? `<button class="hub-menu-card hub-menu-card--executive" type="button" data-section="executive">
         <span class="hub-menu-card__icon" aria-hidden="true">↗</span>
         <span><strong>Executive dashboard</strong><small>Explore long-term business performance and the leading indicators ahead</small></span>
+        <span class="hub-menu-card__arrow" aria-hidden="true">›</span>
+      </button>` : ""}
+      ${canViewProfitPlan() ? `<button class="hub-menu-card hub-menu-card--profit-plan" type="button" data-section="profit-plan">
+        <span class="hub-menu-card__icon" aria-hidden="true">↟</span>
+        <span><strong>Profit Improvement Plan</strong><small>Set priorities, track actions and measure the profit improvement delivered</small></span>
         <span class="hub-menu-card__arrow" aria-hidden="true">›</span>
       </button>` : ""}
     </section>
@@ -1217,6 +1230,263 @@ function renderExecutiveDashboard() {
   </section>`;
 }
 
+const profitPlanKpis = [
+  { id: "covers", label: "Total covers", shortLabel: "Covers", kind: "number", basis: "Total for the selected period", value: (rows) => executiveMetric(rows, "covers", "sum") },
+  { id: "food-spend", label: "Food spend per head", shortLabel: "Food SPH", kind: "currency-decimal", basis: "Food sales inc. VAT ÷ covers", value: (rows) => profitPlanRatio(rows, "foodSalesInc", "covers") },
+  { id: "drink-spend", label: "Drink spend per head", shortLabel: "Drink SPH", kind: "currency-decimal", basis: "Drink sales inc. VAT ÷ covers", value: (rows) => profitPlanRatio(rows, "drinkSalesInc", "covers") },
+  { id: "total-spend", label: "Total spend per head", shortLabel: "Total SPH", kind: "currency-decimal", basis: "Sales inc. VAT ÷ covers", value: (rows) => profitPlanRatio(rows, "salesInc", "covers") },
+  { id: "food-gp-percent", label: "Food GP %", shortLabel: "Food GP", kind: "percentage", basis: "Adjusted food GP", value: (rows) => profitPlanRatio(rows, "adjustedFoodGpPounds", "foodSalesInc", 1 / 1.2) },
+  { id: "drink-gp-percent", label: "Drink GP %", shortLabel: "Drink GP", kind: "percentage", basis: "Adjusted drink GP", value: (rows) => profitPlanRatio(rows, "adjustedDrinkGpPounds", "drinkSalesInc", 1 / 1.2) },
+  { id: "combined-gp-percent", label: "Combined GP %", shortLabel: "Overall GP", kind: "percentage", basis: "Overall GP ÷ sales ex. VAT", value: (rows) => profitPlanRatio(rows, "overallGpPounds", "salesEx") },
+  { id: "food-gp-pounds", label: "Food GP £", shortLabel: "Food GP £", kind: "currency", basis: "Adjusted food GP", value: (rows) => executiveMetric(rows, "adjustedFoodGpPounds", "sum") },
+  { id: "drink-gp-pounds", label: "Drink GP £", shortLabel: "Drink GP £", kind: "currency", basis: "Adjusted drink GP", value: (rows) => executiveMetric(rows, "adjustedDrinkGpPounds", "sum") },
+  { id: "total-gp-pounds", label: "Total GP £", shortLabel: "Total GP £", kind: "currency", basis: "Overall GP", value: (rows) => executiveMetric(rows, "overallGpPounds", "sum") },
+  { id: "labour-pounds", label: "Labour £", shortLabel: "Labour £", kind: "currency", lowerIsBetter: true, basis: "Total wages", value: (rows) => executiveMetric(rows, "totalWages", "sum") },
+  { id: "labour-percent", label: "Labour %", shortLabel: "Labour %", kind: "percentage", lowerIsBetter: true, basis: "Total wages ÷ sales ex. VAT", value: (rows) => profitPlanRatio(rows, "totalWages", "salesEx") },
+];
+
+const profitPlanQuarterLabels = {
+  Q1: "Q1 · Apr–Jun",
+  Q2: "Q2 · Jul–Sep",
+  Q3: "Q3 · Oct–Dec",
+  Q4: "Q4 · Jan–Mar",
+};
+
+function profitPlanNumber(value) {
+  if (String(value ?? "").trim() === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function profitPlanRatio(rows, numeratorKey, denominatorKey, denominatorScale = 1) {
+  return executiveRatioMetric(rows, { numeratorKey, denominatorKey, denominatorScale });
+}
+
+function profitPlanFinancialYearRows(year) {
+  return executiveRows().filter((row) => executiveFinancialYear(row.week) === year);
+}
+
+function profitPlanQuarterForWeek(week) {
+  const month = Number(String(week).slice(5, 7));
+  if (month >= 4 && month <= 6) return "Q1";
+  if (month >= 7 && month <= 9) return "Q2";
+  if (month >= 10 && month <= 12) return "Q3";
+  return "Q4";
+}
+
+function profitPlanQuarterRows(year, quarter) {
+  return profitPlanFinancialYearRows(year).filter((row) => profitPlanQuarterForWeek(row.week) === quarter);
+}
+
+function profitPlanMonths(year, quarter) {
+  return [...new Set(profitPlanQuarterRows(year, quarter).map((row) => row.week.slice(0, 7)))];
+}
+
+function profitPlanContribution(rows) {
+  const grossProfit = executiveMetric(rows, "overallGpPounds", "sum");
+  const wages = executiveMetric(rows, "totalWages", "sum");
+  return Number.isFinite(grossProfit) && Number.isFinite(wages) ? grossProfit - wages : null;
+}
+
+function profitPlanKpi(id) {
+  return profitPlanKpis.find((item) => item.id === id) || null;
+}
+
+function profitPlanKpiValue(rows, id) {
+  return profitPlanKpi(id)?.value(rows) ?? null;
+}
+
+function profitPlanFormatKpi(kpi, value) {
+  if (!kpi || !Number.isFinite(value)) return "—";
+  if (kpi.kind === "currency-decimal") return new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+  return executiveFormat(value, kpi.kind);
+}
+
+function profitPlanInputValue(kpi, value) {
+  if (!Number.isFinite(value)) return "";
+  if (kpi?.kind === "percentage") return (value * 100).toFixed(1);
+  if (kpi?.kind === "currency-decimal") return value.toFixed(2);
+  return kpi?.kind === "number" || kpi?.kind === "currency" ? value.toFixed(0) : String(value);
+}
+
+function profitPlanInputNumber(kpi, value) {
+  const number = profitPlanNumber(value);
+  return number === null ? null : kpi?.kind === "percentage" ? number / 100 : number;
+}
+
+function profitPlanKpiOptions(selected = "") {
+  return `<option value="">Choose a KPI</option>${profitPlanKpis.map((kpi) => `<option value="${kpi.id}" ${selected === kpi.id ? "selected" : ""}>${escapeHtml(kpi.label)}</option>`).join("")}`;
+}
+
+function profitPlanDefault(year) {
+  const years = executiveFinancialYears();
+  const index = years.indexOf(year);
+  const previousYear = index > 0 ? years[index - 1] : "";
+  return {
+    financialYear: year,
+    baselineOverride: "",
+    targetProfit: "",
+    confirmedDelivered: "",
+    opportunities: [],
+    quarters: Object.fromEntries(Object.keys(profitPlanQuarterLabels).map((quarter) => [quarter, { focusKpiId: "", target: "", expectedBenefit: "", owner: "", actions: "", status: "not-started" }])),
+    reviews: {},
+    previousYear,
+  };
+}
+
+function profitPlanForYear(year) {
+  const fallback = profitPlanDefault(year);
+  const saved = state.profitPlans?.[year];
+  if (!saved) return fallback;
+  return {
+    ...fallback,
+    ...saved,
+    quarters: Object.fromEntries(Object.keys(profitPlanQuarterLabels).map((quarter) => [quarter, { ...fallback.quarters[quarter], ...(saved.quarters?.[quarter] || {}) }])),
+    reviews: { ...(saved.reviews || {}) },
+    opportunities: Array.isArray(saved.opportunities) ? saved.opportunities : [],
+  };
+}
+
+function saveProfitPlan(plan, message = "") {
+  state = {
+    ...state,
+    profitPlans: { ...(state.profitPlans || {}), [plan.financialYear]: plan },
+    profitPlanYear: plan.financialYear,
+    profitPlanMessage: message,
+  };
+}
+
+function profitPlanSelectedYear() {
+  const years = executiveFinancialYears();
+  return years.includes(state.profitPlanYear) ? state.profitPlanYear : years.at(-1) || "";
+}
+
+function profitPlanCurrentQuarter(year) {
+  const rows = profitPlanFinancialYearRows(year);
+  return rows.length ? profitPlanQuarterForWeek(rows.at(-1).week) : "Q1";
+}
+
+function profitPlanTone(value, target, lowerIsBetter = false) {
+  if (!Number.isFinite(value) || !Number.isFinite(target)) return "neutral";
+  const onTarget = lowerIsBetter ? value <= target : value >= target;
+  const closeToTarget = lowerIsBetter ? value <= target * 1.05 : value >= target * .95;
+  return onTarget ? "positive" : closeToTarget ? "caution" : "negative";
+}
+
+function profitPlanStatusLabel(status) {
+  return ({ "not-started": "Not started", "in-progress": "In progress", complete: "Complete", "on-hold": "On hold", cancelled: "Cancelled", identified: "Identified", delivered: "Delivered" })[status] || "Identified";
+}
+
+function profitPlanPeopleOptions(selected = "") {
+  const people = state.taskData?.people || [];
+  return `<option value="">Choose an owner</option>${people.map((person) => `<option value="${escapeHtml(person.name)}" ${selected === person.name ? "selected" : ""}>${escapeHtml(person.name)}</option>`).join("")}`;
+}
+
+function renderProfitPlanSummaryCard(label, value, note = "", tone = "neutral") {
+  return `<article class="profit-plan-summary-card profit-plan-summary-card--${tone}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong>${note ? `<small>${escapeHtml(note)}</small>` : ""}</article>`;
+}
+
+function renderProfitPlanOpportunity(opportunity) {
+  const benefit = profitPlanNumber(opportunity.expectedBenefit);
+  return `<article class="profit-opportunity profit-opportunity--${escapeHtml(opportunity.priority || "medium")}">
+    <div class="profit-opportunity__heading"><div><span>${escapeHtml(opportunity.category || "Other")}</span><h3>${escapeHtml(opportunity.title)}</h3></div><strong>${benefit === null ? "Estimate needed" : executiveFormat(benefit, "currency")}</strong></div>
+    <p>${escapeHtml(opportunity.description || "No description added yet.")}</p>
+    <dl><div><dt>Baseline</dt><dd>${escapeHtml(opportunity.baseline || "—")}</dd></div><div><dt>Target</dt><dd>${escapeHtml(opportunity.target || "—")}</dd></div><div><dt>Owner</dt><dd>${escapeHtml(opportunity.owner || "Unassigned")}</dd></div><div><dt>Due</dt><dd>${escapeHtml(opportunity.dueDate ? formatDate(opportunity.dueDate) : "Not set")}</dd></div></dl>
+    ${opportunity.actions ? `<p class="profit-opportunity__actions"><strong>Actions:</strong> ${escapeHtml(opportunity.actions)}</p>` : ""}
+    <form class="profit-opportunity__status" data-profit-opportunity-status><input type="hidden" name="opportunityId" value="${escapeHtml(opportunity.id)}"><label>Status<select name="status"><option value="identified" ${opportunity.status === "identified" ? "selected" : ""}>Identified</option><option value="in-progress" ${opportunity.status === "in-progress" ? "selected" : ""}>In progress</option><option value="delivered" ${opportunity.status === "delivered" ? "selected" : ""}>Delivered</option><option value="on-hold" ${opportunity.status === "on-hold" ? "selected" : ""}>On hold</option><option value="cancelled" ${opportunity.status === "cancelled" ? "selected" : ""}>Cancelled</option></select></label><button type="submit">Save</button><button type="button" data-action="remove-profit-opportunity" data-opportunity-id="${escapeHtml(opportunity.id)}">Remove</button></form>
+  </article>`;
+}
+
+function renderProfitPlanQuarter(plan, year, quarter) {
+  const focus = plan.quarters?.[quarter] || {};
+  const kpi = profitPlanKpi(focus.focusKpiId);
+  const rows = profitPlanQuarterRows(year, quarter);
+  const actual = kpi ? profitPlanKpiValue(rows, kpi.id) : null;
+  const prior = kpi ? profitPlanKpiValue(executiveComparableRows(rows.map((row) => row.week)), kpi.id) : null;
+  const target = profitPlanNumber(focus.target);
+  const active = profitPlanCurrentQuarter(year) === quarter;
+  const tone = profitPlanTone(actual, target, kpi?.lowerIsBetter);
+  return `<form class="profit-quarter ${active ? "is-active" : ""}" data-profit-quarter-form data-quarter="${quarter}">
+    <div class="profit-quarter__heading"><div><span>${profitPlanQuarterLabels[quarter]}</span><h3>${kpi ? escapeHtml(kpi.label) : "Set primary KPI focus"}</h3></div><i class="profit-status profit-status--${tone}">${active ? "Current focus" : profitPlanStatusLabel(focus.status)}</i></div>
+    <div class="profit-quarter__metrics"><div><span>Starting point</span><strong>${kpi ? profitPlanFormatKpi(kpi, prior) : "—"}</strong></div><div><span>Current actual</span><strong>${kpi ? profitPlanFormatKpi(kpi, actual) : "—"}</strong></div><div><span>Target</span><strong>${kpi && target !== null ? profitPlanFormatKpi(kpi, target) : "Set target"}</strong></div></div>
+    <div class="profit-quarter__fields"><label>Primary KPI<select name="focusKpiId">${profitPlanKpiOptions(focus.focusKpiId)}</select></label><label>Quarter KPI target<input name="target" inputmode="decimal" value="${escapeHtml(kpi ? profitPlanInputValue(kpi, target) : "")}" placeholder="Enter target"></label><label>Expected £ benefit<input name="expectedBenefit" type="number" inputmode="decimal" min="0" step="1" value="${escapeHtml(focus.expectedBenefit || "")}" placeholder="Optional"></label><label>Owner<select name="owner">${profitPlanPeopleOptions(focus.owner)}</select></label><label>Plan status<select name="status"><option value="not-started" ${focus.status === "not-started" ? "selected" : ""}>Not started</option><option value="in-progress" ${focus.status === "in-progress" ? "selected" : ""}>In progress</option><option value="complete" ${focus.status === "complete" ? "selected" : ""}>Complete</option><option value="on-hold" ${focus.status === "on-hold" ? "selected" : ""}>On hold</option><option value="cancelled" ${focus.status === "cancelled" ? "selected" : ""}>Cancelled</option></select></label><label class="profit-quarter__actions">Key actions<textarea name="actions" rows="3" placeholder="What will change this quarter?">${escapeHtml(focus.actions || "")}</textarea></label></div>
+    <button type="submit">Save ${quarter} focus</button>
+  </form>`;
+}
+
+function renderProfitPlanWeeklyTracking(plan, year) {
+  const quarter = profitPlanCurrentQuarter(year);
+  const focus = plan.quarters?.[quarter] || {};
+  const kpi = profitPlanKpi(focus.focusKpiId);
+  if (!kpi) return `<section class="profit-plan-panel profit-weekly-tracking"><div class="profit-plan-panel__heading"><div><p class="eyebrow">WEEKLY KPI TRACKING</p><h3>Set ${quarter}’s primary KPI to begin tracking</h3></div></div><p>Weekly actuals, the target, a 13-week average and same-week-last-year comparison will appear here automatically once a quarterly focus is selected.</p></section>`;
+  const target = profitPlanNumber(focus.target);
+  const weeklyRows = profitPlanQuarterRows(year, quarter).slice(-13);
+  const allRows = executiveRows();
+  return `<section class="profit-plan-panel profit-weekly-tracking"><div class="profit-plan-panel__heading"><div><p class="eyebrow">WEEKLY KPI TRACKING</p><h3>${escapeHtml(kpi.label)} · ${profitPlanQuarterLabels[quarter]}</h3><p>${escapeHtml(kpi.basis)}. Target: ${target === null ? "not set" : profitPlanFormatKpi(kpi, target)}.</p></div></div><div class="profit-weekly-table-wrap"><table><thead><tr><th>Week</th><th>Actual</th><th>Target</th><th>13-week avg.</th><th>Same week LY</th></tr></thead><tbody>${weeklyRows.map((row) => {
+    const actual = profitPlanKpiValue([row], kpi.id);
+    const index = allRows.findIndex((item) => item.week === row.week);
+    const rollingRows = allRows.slice(Math.max(0, index - 12), index + 1);
+    const rolling = rollingRows.map((item) => profitPlanKpiValue([item], kpi.id)).filter(Number.isFinite);
+    const rollingAverage = rolling.length ? rolling.reduce((total, value) => total + value, 0) / rolling.length : null;
+    const prior = profitPlanKpiValue(executiveComparableRows([row.week]), kpi.id);
+    const tone = profitPlanTone(actual, target, kpi.lowerIsBetter);
+    return `<tr class="profit-weekly-row--${tone}"><td>${escapeHtml(formatDate(row.week))}</td><td>${profitPlanFormatKpi(kpi, actual)}</td><td>${target === null ? "—" : profitPlanFormatKpi(kpi, target)}</td><td>${profitPlanFormatKpi(kpi, rollingAverage)}</td><td>${profitPlanFormatKpi(kpi, prior)}</td></tr>`;
+  }).join("") || '<tr><td colspan="5">No weekly data is available for this quarter yet.</td></tr>'}</tbody></table></div></section>`;
+}
+
+function renderProfitPlanReview(plan, year) {
+  const quarter = profitPlanCurrentQuarter(year);
+  const focus = plan.quarters?.[quarter] || {};
+  const kpi = profitPlanKpi(focus.focusKpiId);
+  const months = profitPlanMonths(year, quarter);
+  const month = months.includes(state.profitPlanReviewMonth) ? state.profitPlanReviewMonth : months.at(-1) || "";
+  const review = plan.reviews?.[month] || {};
+  const monthRows = profitPlanFinancialYearRows(year).filter((row) => row.week.startsWith(month));
+  const quarterToDateRows = profitPlanQuarterRows(year, quarter).filter((row) => row.week <= `${month}-31`);
+  const target = profitPlanNumber(focus.target);
+  return `<section class="profit-plan-panel profit-monthly-review"><div class="profit-plan-panel__heading"><div><p class="eyebrow">MONTHLY REVIEW</p><h3>${month ? monthTitle(month) : "Monthly checkpoint"}</h3></div></div><form data-profit-review-form><label>Review month<select name="month" data-action="profit-plan-review-month">${months.map((item) => `<option value="${item}" ${item === month ? "selected" : ""}>${monthTitle(item)}</option>`).join("")}</select></label><div class="profit-review__metrics"><div><span>Target KPI</span><strong>${kpi ? escapeHtml(kpi.label) : "Choose a quarterly focus"}</strong></div><div><span>Month actual</span><strong>${kpi ? profitPlanFormatKpi(kpi, profitPlanKpiValue(monthRows, kpi.id)) : "—"}</strong></div><div><span>Quarter to date</span><strong>${kpi ? profitPlanFormatKpi(kpi, profitPlanKpiValue(quarterToDateRows, kpi.id)) : "—"}</strong></div><div><span>Target</span><strong>${kpi && target !== null ? profitPlanFormatKpi(kpi, target) : "—"}</strong></div></div><label>Management review<textarea name="comments" rows="3" placeholder="What happened, what was learned, and what will change next month?">${escapeHtml(review.comments || "")}</textarea></label><label>Decision for next month<textarea name="decision" rows="2" placeholder="Keep, adjust, pause or escalate the plan.">${escapeHtml(review.decision || "")}</textarea></label><button type="submit">Save monthly review</button></form></section>`;
+}
+
+function renderProfitImprovementPlan() {
+  const years = executiveFinancialYears();
+  if (!years.length) return `<section class="profit-plan-page"><button class="back-link" type="button" data-section="hub">&larr; Information Hub</button><div class="page-intro"><p class="eyebrow">PROFIT IMPROVEMENT PLAN</p><h2>Build a better year</h2><p>Upload the full Master Performance Sheet to start a financial-year profit plan.</p></div></section>`;
+  const year = profitPlanSelectedYear();
+  const plan = profitPlanForYear(year);
+  const yearRows = profitPlanFinancialYearRows(year);
+  const previousRows = plan.previousYear ? profitPlanFinancialYearRows(plan.previousYear) : [];
+  const contributionProxy = profitPlanContribution(previousRows);
+  const approvedBaseline = profitPlanNumber(plan.baselineOverride);
+  const baseline = approvedBaseline === null ? contributionProxy : approvedBaseline;
+  const target = profitPlanNumber(plan.targetProfit);
+  const required = target !== null && approvedBaseline !== null ? target - approvedBaseline : null;
+  const identified = plan.opportunities.filter((item) => !["cancelled"].includes(item.status)).reduce((total, item) => total + (profitPlanNumber(item.expectedBenefit) || 0), 0);
+  const delivered = profitPlanNumber(plan.confirmedDelivered);
+  const progress = required && required > 0 && delivered !== null ? Math.max(0, Math.min(1, delivered / required)) : null;
+  const activeQuarter = profitPlanCurrentQuarter(year);
+  const activeFocus = plan.quarters?.[activeQuarter] || {};
+  const rankedOpportunities = [...plan.opportunities].sort((left, right) => (profitPlanNumber(right.expectedBenefit) || 0) - (profitPlanNumber(left.expectedBenefit) || 0));
+  const coverageTone = required !== null && required > 0 ? identified >= required ? "positive" : "caution" : "neutral";
+  return `<section class="profit-plan-page">
+    <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
+    <div class="profit-plan-hero"><p class="eyebrow">PROFIT IMPROVEMENT PLAN</p><h2>Build a better financial year</h2><p>Turn the weekly performance data into a focused plan: where we are, what will change, and whether the improvement is being delivered.</p></div>
+    <section class="profit-plan-controls"><label>Financial year<select data-action="profit-plan-year">${years.map((item) => `<option value="${item}" ${item === year ? "selected" : ""}>Financial year ${item}</option>`).join("")}</select></label><p><strong>${escapeHtml(year)} plan</strong><span>${yearRows.length} reporting weeks loaded from the Master Performance Sheet</span></p></section>
+    <p class="profit-plan-local-note"><strong>Local prototype:</strong> plans, opportunities and review notes are saved only in this browser until you approve the live version. “Operating contribution” is GP after wages, not audited operating profit.</p>
+    ${state.profitPlanMessage ? `<p class="profit-plan-message">${escapeHtml(state.profitPlanMessage)}</p>` : ""}
+    <section class="profit-plan-summary" aria-label="Annual profit plan summary">
+      ${renderProfitPlanSummaryCard("Baseline contribution", baseline === null ? "Set baseline" : executiveFormat(baseline, "currency"), approvedBaseline === null ? plan.previousYear ? `GP after wages proxy · FY ${plan.previousYear}` : "No prior-year proxy available" : "Approved management-account baseline")}
+      ${renderProfitPlanSummaryCard("Target annual profit", target === null ? "Set target" : executiveFormat(target, "currency"), "Enter an approved management-account target")}
+      ${renderProfitPlanSummaryCard("Required improvement", required === null ? "Set approved baseline + target" : executiveFormat(required, "currency"), required !== null && required < 0 ? "Target is below baseline" : "Target less approved baseline", required !== null && required <= 0 ? "positive" : "neutral")}
+      ${renderProfitPlanSummaryCard("Identified opportunities", executiveFormat(identified, "currency"), required !== null && required > 0 ? `${Math.round((identified / required) * 100)}% of required improvement covered` : "Standalone estimates; may overlap", coverageTone)}
+      ${renderProfitPlanSummaryCard("Confirmed improvement delivered", delivered === null ? "Set after P&L review" : executiveFormat(delivered, "currency"), progress === null ? "Use confirmed management-account result" : `${Math.round(progress * 100)}% of annual target`, progress === null ? "neutral" : progress >= 1 ? "positive" : "caution")}
+    </section>
+    <section class="profit-plan-panel profit-plan-setup"><div class="profit-plan-panel__heading"><div><p class="eyebrow">ANNUAL PROFIT PLAN</p><h3>Set the financial objective</h3></div></div><form data-profit-plan-form="summary"><label>Approved operating-profit baseline (£)<input name="baselineOverride" type="number" inputmode="decimal" step="1" value="${escapeHtml(plan.baselineOverride)}" placeholder="Enter from management accounts"></label><label>Target annual operating profit (£)<input name="targetProfit" type="number" inputmode="decimal" step="1" value="${escapeHtml(plan.targetProfit)}" placeholder="e.g. 160000"></label><label>Confirmed improvement delivered (£)<input name="confirmedDelivered" type="number" inputmode="decimal" step="1" value="${escapeHtml(plan.confirmedDelivered)}" placeholder="Enter after P&L review"></label><button type="submit">Save annual plan</button></form><p>Use management accounts for these three figures. Until the approved baseline is entered, the prior-year GP-after-wages figure is shown only as an operating-contribution proxy.</p></section>
+    <section class="profit-plan-bridge"><div><p class="eyebrow">ANNUAL PROFIT BRIDGE</p><h3>Plan coverage</h3><p>Opportunity estimates are useful for prioritisation, but the live forecast will combine KPI drivers once assumptions are agreed—so we do not add overlapping revenue and GP gains twice.</p></div><div class="profit-plan-bridge__figures"><span>Approved baseline<strong>${approvedBaseline === null ? "Set baseline" : executiveFormat(approvedBaseline, "currency")}</strong></span><i>+</i><span>Identified opportunities<strong>${executiveFormat(identified, "currency")}</strong></span><i>=</i><span>Target<strong>${target === null ? "Set target" : executiveFormat(target, "currency")}</strong></span></div></section>
+    <section class="profit-plan-opportunities"><div class="profit-plan-panel__heading"><div><p class="eyebrow">PROFIT OPPORTUNITIES</p><h3>Where will the improvement come from?</h3><p>Add a quantified opportunity, then use the quarterly focus to turn it into actions.</p></div></div><form class="profit-opportunity-form" data-profit-opportunity-form><label>Area<select name="category">${profitPlanKpis.map((kpi) => `<option value="${kpi.label}">${escapeHtml(kpi.label)}</option>`).join("")}<option value="Waste">Waste</option><option value="Purchasing">Purchasing</option><option value="Menu pricing">Menu pricing</option><option value="Other">Other</option></select></label><label>Opportunity title<input required name="title" maxlength="120" placeholder="e.g. Raise wine attachment"></label><label>Current baseline<input name="baseline" maxlength="80" placeholder="e.g. £9.80 SPH"></label><label>Target<input name="target" maxlength="80" placeholder="e.g. £10.75 SPH"></label><label>Estimated annual £ benefit<input required name="expectedBenefit" type="number" inputmode="decimal" min="0" step="1" placeholder="0"></label><label>Priority<select name="priority"><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select></label><label>Owner<select name="owner">${profitPlanPeopleOptions()}</select></label><label>Target completion<input name="dueDate" type="date"></label><label class="profit-opportunity-form__wide">Description<textarea name="description" rows="2" placeholder="Why this matters and how the benefit is expected to be achieved."></textarea></label><label class="profit-opportunity-form__wide">Actions required<textarea name="actions" rows="2" placeholder="The practical changes required to deliver it."></textarea></label><button type="submit">Add opportunity</button></form><p class="profit-plan-data-note">Estimated opportunity benefits are deliberately shown as standalone estimates. The combined plan will avoid double-counting volume, spend and GP changes.</p><div class="profit-opportunity-grid">${rankedOpportunities.length ? rankedOpportunities.map(renderProfitPlanOpportunity).join("") : '<p class="profit-plan-empty">No opportunities yet. Start with the clearest commercial or cost opportunity for the year.</p>'}</div></section>
+    <section class="profit-plan-quarterly"><div class="profit-plan-panel__heading"><div><p class="eyebrow">QUARTERLY KPI FOCUS</p><h3>One primary KPI at a time</h3><p>${profitPlanQuarterLabels[activeQuarter]} is the current focus period. Improved levels become the expected operating standard rather than resetting at quarter end.</p></div></div><div class="profit-quarter-grid">${Object.keys(profitPlanQuarterLabels).map((quarter) => renderProfitPlanQuarter(plan, year, quarter)).join("")}</div></section>
+    <div class="profit-plan-detail-grid">${renderProfitPlanReview(plan, year)}${renderProfitPlanWeeklyTracking(plan, year)}</div>
+  </section>`;
+}
+
 function renderNoReport() {
   if (canPublishReport()) return renderUpdateReport();
   return `<section class="auth-page"><div class="auth-card"><p class="eyebrow">WEEKLY REPORTS</p><h2>Your account is ready</h2><p>There is no weekly report published yet. An Admin or Owner will upload it shortly.</p><button class="auth-link" type="button" data-section="hub">Back to Information Hub</button><button class="auth-link" type="button" data-action="sign-out">Sign out</button></div></section>`;
@@ -1453,6 +1723,15 @@ function renderMenu() {
     renderDrawerFooter();
     return;
   }
+  if (state.section === "profit-plan") {
+    setDrawerHeading("PROFIT PLAN", "Profit improvement");
+    sectionMenu.innerHTML = [
+      `<button class="menu-item" data-section="hub"><span class="menu-item__icon">⌂</span><span>Information Hub</span><span class="menu-item__chevron">›</span></button>`,
+      `<button class="menu-item menu-item--profit-plan is-active" data-section="profit-plan"><span class="menu-item__icon">↟</span><span>Profit Improvement Plan</span><span class="menu-item__chevron">›</span></button>`,
+    ].join("");
+    renderDrawerFooter();
+    return;
+  }
   if (state.section === "hub") {
     setDrawerHeading("HUB MENU", "Information Hub");
     sectionMenu.innerHTML = [
@@ -1461,6 +1740,7 @@ function renderMenu() {
       renderTaskMenuItem(),
       ...(canManageUsers() && !state.previewUser ? [`<button class="menu-item" data-section="users"><span class="menu-item__icon">♙</span><span>Users</span><span class="menu-item__chevron">›</span></button>`] : []),
       ...(canViewExecutiveDashboard() ? [`<button class="menu-item menu-item--executive" data-section="executive"><span class="menu-item__icon">↗</span><span>Executive dashboard</span><span class="menu-item__chevron">›</span></button>`] : []),
+      ...(canViewProfitPlan() ? [`<button class="menu-item menu-item--profit-plan" data-section="profit-plan"><span class="menu-item__icon">↟</span><span>Profit Improvement Plan</span><span class="menu-item__chevron">›</span></button>`] : []),
     ].join("");
     renderDrawerFooter();
     return;
@@ -1684,7 +1964,7 @@ function render() {
   }
   topWeek.textContent = report ? formatDate(state.week || report.selectedWeek, true).replace(/&mdash;/g, "—") : "No report yet";
   renderMenu();
-  const page = state.section === "hub" ? renderHub() : state.section === "tasks" ? renderTasks() : state.section === "set-task" ? renderSetTask() : state.section === "users" ? renderUsers() : state.section === "activity" ? renderActivity() : state.section === "executive" ? renderExecutiveDashboard() : state.section === "admin" ? (state.menuMode === "tasks" ? renderTaskAdmin() : renderAdmin()) : !report ? renderNoReport() : state.section === "overview" ? renderOverview() : state.section === "update-report" ? renderUpdateReport() : renderSection(getSection(state.section));
+  const page = state.section === "hub" ? renderHub() : state.section === "tasks" ? renderTasks() : state.section === "set-task" ? renderSetTask() : state.section === "users" ? renderUsers() : state.section === "activity" ? renderActivity() : state.section === "executive" ? renderExecutiveDashboard() : state.section === "profit-plan" ? renderProfitImprovementPlan() : state.section === "admin" ? (state.menuMode === "tasks" ? renderTaskAdmin() : renderAdmin()) : !report ? renderNoReport() : state.section === "overview" ? renderOverview() : state.section === "update-report" ? renderUpdateReport() : renderSection(getSection(state.section));
   app.innerHTML = `${renderPreviewBanner()}${page}`;
   attachDynamicListeners();
   if ((state.section === "admin" || state.section === "users" || state.section === "activity") && state.adminUsers === null) void loadAdminUsers();
@@ -1713,6 +1993,7 @@ function changeSection(section) {
     || (section === "users" && canManageUsers() && !state.previewUser)
     || (section === "activity" && canManageUsers() && !state.previewUser)
     || (section === "executive" && canViewExecutiveDashboard())
+    || (section === "profit-plan" && canViewProfitPlan())
     || section === "overview"
     || (section === "update-report" && canPublishReport() && !state.previewUser)
     || (section === "admin" && canManageUsers() && !state.previewUser)
@@ -1720,7 +2001,7 @@ function changeSection(section) {
   if (!permitted) return;
   const taskRoute = section === "tasks" || section === "set-task";
   const userRoute = section === "users" || section === "activity";
-  state = { ...state, section, menuMode: taskRoute ? "tasks" : userRoute ? "users" : section === "admin" ? state.menuMode : "report" };
+  state = { ...state, section, menuMode: taskRoute ? "tasks" : userRoute ? "users" : section === "admin" ? state.menuMode : section === "profit-plan" ? "profit-plan" : "report" };
   recordSectionActivity(section);
   closeMenu();
   render();
@@ -1758,6 +2039,7 @@ function recordSectionActivity(section) {
   if (section === "users") return recordActivity("users");
   if (section === "activity") return recordActivity("user-activity");
   if (section === "executive") return recordActivity("executive-dashboard");
+  if (section === "profit-plan") return;
   if (section === "admin") return recordActivity("report-permissions");
   if (section === "update-report") return recordActivity("report-update");
   if (section === "overview") return recordActivity("report-overview", formatDate(report?.selectedWeek || state.week));
@@ -2210,7 +2492,7 @@ async function signOut() {
   localPreviewModel = null;
   sharedReportVersion = "";
   lastActivityKey = "";
-  state = { section: "hub", week: "", sourceName: "", isUploaded: false, authMode: "login", authMessage: "You have signed out.", authToken: "", user: null, access: null, adminUsers: null, adminMessage: "", availableWeeks: [], taskData: null, taskMessage: "", menuMode: "report", executive: null, executivePeriod: "", executiveMetricModes: {}, executiveDetailMetric: "", executiveDetailOverlays: [], executiveDetailYearScope: "all", executiveScenarioOpen: false, executiveScenario: null };
+  state = { section: "hub", week: "", sourceName: "", isUploaded: false, authMode: "login", authMessage: "You have signed out.", authToken: "", user: null, access: null, adminUsers: null, adminMessage: "", availableWeeks: [], taskData: null, taskMessage: "", menuMode: "report", executive: null, executivePeriod: "", executiveMetricModes: {}, executiveDetailMetric: "", executiveDetailOverlays: [], executiveDetailYearScope: "all", executiveScenarioOpen: false, executiveScenario: null, profitPlans: {}, profitPlanYear: "", profitPlanMessage: "", profitPlanReviewMonth: "" };
   updateTaskBadge(0);
   render();
 }
@@ -2251,6 +2533,15 @@ function collapseExpandedTable({ restoreFocus = true } = {}) {
   document.body.classList.remove("table-expanded");
   document.documentElement.style.removeProperty("--expanded-table-height");
   if (restoreFocus && table.isConnected) table.focus({ preventScroll: true });
+}
+
+function updateSelectedProfitPlan(mutator, message) {
+  const year = profitPlanSelectedYear();
+  if (!year) return;
+  const plan = profitPlanForYear(year);
+  mutator(plan);
+  saveProfitPlan(plan, message);
+  render();
 }
 
 function attachDynamicListeners() {
@@ -2359,6 +2650,92 @@ function attachDynamicListeners() {
   document.querySelectorAll("[data-action='remove-executive-overlay']").forEach((button) => button.addEventListener("click", () => {
     state = { ...state, executiveDetailOverlays: (state.executiveDetailOverlays || []).filter((metric) => metric !== button.dataset.metric) };
     render();
+  }));
+  document.querySelectorAll("[data-action='profit-plan-year']").forEach((select) => select.addEventListener("change", () => {
+    state = { ...state, profitPlanYear: select.value, profitPlanReviewMonth: "", profitPlanMessage: "" };
+    render();
+  }));
+  document.querySelectorAll("[data-profit-plan-form='summary']").forEach((form) => form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const values = new FormData(form);
+    updateSelectedProfitPlan((plan) => {
+      plan.baselineOverride = values.get("baselineOverride")?.trim() || "";
+      plan.targetProfit = values.get("targetProfit")?.trim() || "";
+      plan.confirmedDelivered = values.get("confirmedDelivered")?.trim() || "";
+    }, "Annual plan saved locally.");
+  }));
+  document.querySelectorAll("[data-profit-opportunity-form]").forEach((form) => form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const values = new FormData(form);
+    const expectedBenefit = profitPlanNumber(values.get("expectedBenefit"));
+    const title = values.get("title")?.trim();
+    if (!title || expectedBenefit === null) {
+      state = { ...state, profitPlanMessage: "Add an opportunity title and an estimated annual £ benefit." };
+      render();
+      return;
+    }
+    updateSelectedProfitPlan((plan) => {
+      plan.opportunities = [...plan.opportunities, {
+        id: `local-profit-opportunity-${Date.now()}`,
+        category: values.get("category")?.trim() || "Other",
+        title,
+        baseline: values.get("baseline")?.trim() || "",
+        target: values.get("target")?.trim() || "",
+        expectedBenefit: String(expectedBenefit),
+        priority: values.get("priority")?.trim() || "medium",
+        owner: values.get("owner")?.trim() || "",
+        dueDate: values.get("dueDate")?.trim() || "",
+        description: values.get("description")?.trim() || "",
+        actions: values.get("actions")?.trim() || "",
+        status: "identified",
+      }];
+    }, "Opportunity added locally.");
+  }));
+  document.querySelectorAll("[data-profit-opportunity-status]").forEach((form) => form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const values = new FormData(form);
+    const opportunityId = values.get("opportunityId");
+    updateSelectedProfitPlan((plan) => {
+      plan.opportunities = plan.opportunities.map((opportunity) => opportunity.id === opportunityId ? { ...opportunity, status: values.get("status") } : opportunity);
+    }, "Opportunity status saved locally.");
+  }));
+  document.querySelectorAll("[data-action='remove-profit-opportunity']").forEach((button) => button.addEventListener("click", () => {
+    updateSelectedProfitPlan((plan) => {
+      plan.opportunities = plan.opportunities.filter((opportunity) => opportunity.id !== button.dataset.opportunityId);
+    }, "Opportunity removed from this local plan.");
+  }));
+  document.querySelectorAll("[data-profit-quarter-form]").forEach((form) => form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const values = new FormData(form);
+    const quarter = form.dataset.quarter;
+    const kpi = profitPlanKpi(values.get("focusKpiId"));
+    updateSelectedProfitPlan((plan) => {
+      plan.quarters[quarter] = {
+        ...plan.quarters[quarter],
+        focusKpiId: kpi?.id || "",
+        target: kpi ? (profitPlanInputNumber(kpi, values.get("target")) ?? "") : "",
+        expectedBenefit: values.get("expectedBenefit")?.trim() || "",
+        owner: values.get("owner")?.trim() || "",
+        actions: values.get("actions")?.trim() || "",
+        status: values.get("status")?.trim() || "not-started",
+      };
+    }, `${quarter} focus saved locally.`);
+  }));
+  document.querySelectorAll("[data-action='profit-plan-review-month']").forEach((select) => select.addEventListener("change", () => {
+    state = { ...state, profitPlanReviewMonth: select.value };
+    render();
+  }));
+  document.querySelectorAll("[data-profit-review-form]").forEach((form) => form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const values = new FormData(form);
+    const month = values.get("month")?.trim();
+    if (!month) return;
+    updateSelectedProfitPlan((plan) => {
+      plan.reviews = {
+        ...plan.reviews,
+        [month]: { comments: values.get("comments")?.trim() || "", decision: values.get("decision")?.trim() || "", updatedAt: new Date().toISOString() },
+      };
+    }, `${monthTitle(month)} review saved locally.`);
   }));
   document.querySelectorAll("select[name='dateScope']").forEach((select) => select.addEventListener("change", () => {
     const range = select.closest(".permission-area")?.querySelector(".permission-date-range");

@@ -3841,17 +3841,32 @@ function accountantBudgetMonthColumns(rows) {
   return candidates.sort((left, right) => right.columns.length - left.columns.length)[0] || null;
 }
 
-function accountantBudgetRow(rows, labels) {
+function accountantBudgetRow(rows, labels, labelColumnIndex = null) {
   const wanted = labels.map(accountantBudgetLabel);
+  if (Number.isInteger(labelColumnIndex) && labelColumnIndex >= 0) {
+    const aligned = rows.find((row) => wanted.includes(accountantBudgetLabel(row[labelColumnIndex])));
+    if (aligned) return aligned;
+  }
   return rows.find((row) => row.some((value) => wanted.includes(accountantBudgetLabel(value)))) || null;
 }
 
-function accountantBudgetValue(rows, labels, columnIndex) {
-  const row = accountantBudgetRow(rows, labels);
+function accountantBudgetValue(rows, labels, columnIndex, labelColumnIndex = null) {
+  const row = accountantBudgetRow(rows, labels, labelColumnIndex);
   return row ? accountantBudgetNumber(row[columnIndex]) : null;
 }
 
-function accountantBudgetSheetScore(sheetName, sheet) {
+function accountantBudgetFinancialYear(sheet) {
+  const header = accountantBudgetMonthColumns(accountantBudgetRows(sheet));
+  const firstMonth = header?.columns
+    .map((item) => item.month)
+    .sort()
+    .find(Boolean);
+  if (!firstMonth) return "";
+  const startYear = Number(firstMonth.slice(0, 4));
+  return Number.isFinite(startYear) ? `${startYear}/${String(startYear + 1).slice(-2)}` : "";
+}
+
+function accountantBudgetSheetScore(sheetName, sheet, preferredFinancialYear = "") {
   const rows = accountantBudgetRows(sheet);
   const headers = accountantBudgetMonthColumns(rows);
   if (!headers) return -Infinity;
@@ -3859,7 +3874,9 @@ function accountantBudgetSheetScore(sheetName, sheet) {
   const expected = ["total turnover", "gross profit", "total labour cost", "operating profit"];
   const matched = expected.filter((label) => labels.includes(label)).length;
   const name = accountantBudgetLabel(sheetName);
-  return (matched * 20) + headers.columns.length + (/budget/.test(name) ? 12 : 0) + (/orig/.test(name) ? 4 : 0) - (/actual|forecast/.test(name) ? 5 : 0);
+  const financialYear = accountantBudgetFinancialYear(sheet);
+  const preferred = financialYear && financialYear === preferredFinancialYear ? 1_000 : 0;
+  return preferred + (matched * 20) + headers.columns.length + (/budget/.test(name) ? 12 : 0) + (/orig/.test(name) ? 4 : 0) - (/actual|forecast/.test(name) ? 5 : 0);
 }
 
 function accountantBudgetPnl(sheetName, sheet, { requireBudget = false } = {}) {
@@ -3870,22 +3887,26 @@ function accountantBudgetPnl(sheetName, sheet, { requireBudget = false } = {}) {
   const first = monthColumns[0];
   const last = monthColumns.at(-1);
   const totalColumn = last.columnIndex + 1;
-  const sales = accountantBudgetValue(rows, ["Total Turnover", "Total Sales"], totalColumn);
-  const grossProfit = accountantBudgetValue(rows, ["Gross Profit"], totalColumn);
-  const labour = accountantBudgetValue(rows, ["Total Labour Cost", "Total Labour"], totalColumn);
-  const operatingProfit = accountantBudgetValue(rows, ["Operating Profit"], totalColumn);
+  // Budget workbooks often repeat the same labels in comparison panels on the
+  // right-hand side. Use the column immediately before the monthly values so
+  // each total is read from the main P&L, rather than a heading elsewhere.
+  const labelColumn = Math.max(0, first.columnIndex - 1);
+  const sales = accountantBudgetValue(rows, ["Total Turnover", "Total Sales"], totalColumn, labelColumn);
+  const grossProfit = accountantBudgetValue(rows, ["Gross Profit"], totalColumn, labelColumn);
+  const labour = accountantBudgetValue(rows, ["Total Labour Cost", "Total Labour"], totalColumn, labelColumn);
+  const operatingProfit = accountantBudgetValue(rows, ["Operating Profit"], totalColumn, labelColumn);
   const missing = [["Total Turnover", sales], ["Gross Profit", grossProfit], ["Total Labour Cost", labour], ["Operating Profit", operatingProfit]].filter(([, value]) => !Number.isFinite(value)).map(([label]) => label);
   if (missing.length) throw new Error(`${sheetName} is not a usable budget P&L. I could not read ${missing.join(", ")}.`);
-  const operatingCosts = accountantBudgetValue(rows, ["Total Administrative Costs", "Operating Costs"], totalColumn) ?? grossProfit - operatingProfit;
-  const overallGpPercent = accountantBudgetValue(rows, ["Overall GP", "Overall GP %"], totalColumn);
-  const labourPercent = accountantBudgetValue(rows, ["Labour %", "Total Labour %"], totalColumn);
+  const operatingCosts = accountantBudgetValue(rows, ["Total Administrative Costs", "Operating Costs"], totalColumn, labelColumn) ?? grossProfit - operatingProfit;
+  const overallGpPercent = accountantBudgetValue(rows, ["Overall GP", "Overall GP %"], totalColumn, labelColumn);
+  const labourPercent = accountantBudgetValue(rows, ["Labour %", "Total Labour %"], totalColumn, labelColumn);
   const months = monthColumns.map(({ columnIndex, month }) => ({
     month,
     label: accountantBudgetMonthLabel(month),
-    sales: accountantBudgetValue(rows, ["Total Turnover", "Total Sales"], columnIndex),
-    grossProfit: accountantBudgetValue(rows, ["Gross Profit"], columnIndex),
-    labour: accountantBudgetValue(rows, ["Total Labour Cost", "Total Labour"], columnIndex),
-    operatingProfit: accountantBudgetValue(rows, ["Operating Profit"], columnIndex),
+    sales: accountantBudgetValue(rows, ["Total Turnover", "Total Sales"], columnIndex, labelColumn),
+    grossProfit: accountantBudgetValue(rows, ["Gross Profit"], columnIndex, labelColumn),
+    labour: accountantBudgetValue(rows, ["Total Labour Cost", "Total Labour"], columnIndex, labelColumn),
+    operatingProfit: accountantBudgetValue(rows, ["Operating Profit"], columnIndex, labelColumn),
   }));
   if (requireBudget && months.some((month) => !Number.isFinite(month.sales) || !Number.isFinite(month.grossProfit) || !Number.isFinite(month.operatingProfit))) {
     throw new Error(`${sheetName} needs monthly Total Turnover, Gross Profit and Operating Profit values for all 12 months.`);
@@ -3907,14 +3928,23 @@ function accountantBudgetPnl(sheetName, sheet, { requireBudget = false } = {}) {
   };
 }
 
-function accountantBudgetFromWorkbook(workbook, sourceName) {
+function accountantBudgetFromWorkbook(workbook, sourceName, preferredFinancialYear = "") {
   const candidates = workbook.SheetNames.map((sheetName) => ({ sheetName, sheet: workbook.Sheets[sheetName] }))
-    .map((item) => ({ ...item, score: accountantBudgetSheetScore(item.sheetName, item.sheet) }))
+    .map((item) => ({ ...item, score: accountantBudgetSheetScore(item.sheetName, item.sheet, preferredFinancialYear) }))
     .filter((item) => Number.isFinite(item.score))
     .sort((left, right) => right.score - left.score);
-  const budgetSheet = candidates[0];
-  if (!budgetSheet || budgetSheet.score < 85) throw new Error("I could not identify an accountant budget P&L. It needs monthly Total Turnover, Gross Profit, Total Labour Cost and Operating Profit lines.");
-  const budget = accountantBudgetPnl(budgetSheet.sheetName, budgetSheet.sheet, { requireBudget: true });
+  const usableBudgets = [];
+  for (const candidate of candidates) {
+    if (candidate.score < 85) continue;
+    try {
+      usableBudgets.push({ ...candidate, budget: accountantBudgetPnl(candidate.sheetName, candidate.sheet, { requireBudget: true }) });
+    } catch (error) {
+      console.warn(`${candidate.sheetName} was not used as the budget source.`, error);
+    }
+  }
+  const budgetSheet = usableBudgets[0];
+  if (!budgetSheet) throw new Error("I could not identify a usable accountant budget P&L. It needs monthly Total Turnover, Gross Profit, Total Labour Cost and Operating Profit lines.");
+  const budget = budgetSheet.budget;
   let priorActual = null;
   const previousYear = `${Number(budget.financialYear.slice(0, 4)) - 1}/${budget.financialYear.slice(2, 4)}`;
   for (const candidate of candidates) {
@@ -3957,7 +3987,7 @@ async function handleBudgetUpload(files) {
   render();
   try {
     const workbook = window.XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
-    const budget = accountantBudgetFromWorkbook(workbook, file.name);
+    const budget = accountantBudgetFromWorkbook(workbook, file.name, profitPlanSelectedYear());
     if (localPreviewMode) {
       state = {
         ...state,

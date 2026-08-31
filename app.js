@@ -7,7 +7,7 @@ import {
   requestPasswordRecovery,
   updateUser,
 } from "https://cdn.jsdelivr.net/npm/@netlify/identity@2.0.0/+esm";
-import { allowedWeeksForAccess, reportForWeek } from "./report-model.js";
+import { allowedWeeksForAccess, isMasterReportModel, reportForWeek } from "./report-model.js";
 
 const app = document.querySelector("#app");
 const sectionMenu = document.querySelector("#section-menu");
@@ -20,6 +20,7 @@ const drawerTitle = document.querySelector("#drawer-title");
 const topWeek = document.querySelector("#top-week");
 const weekButton = document.querySelector("#week-button");
 const uploadInput = document.querySelector("#weekly-report-input");
+const budgetInput = document.querySelector("#budget-input");
 
 const sharedReportEndpoint = "/.netlify/functions/report";
 const authEndpoint = "/.netlify/functions/auth";
@@ -28,6 +29,7 @@ const tasksEndpoint = "/.netlify/functions/tasks";
 const activityEndpoint = "/.netlify/functions/activity";
 const sharedReportPollInterval = 60_000;
 const localPreviewMode = location.hostname === "localhost" && new URLSearchParams(location.search).has("local-preview");
+const localPreviewMasterStorageKey = "larder-information-hub-local-master-v1";
 const lowerIsBetterOverviewIds = new Set(["wages", "foh", "chefs", "senior-management"]);
 let report = null;
 let state = {
@@ -60,6 +62,14 @@ let state = {
   profitPlanYear: "",
   profitPlanMessage: "",
   profitPlanReviewMonth: "",
+  profitPlanBudget: null,
+  overviewPaceOpen: false,
+  budgetSalesAssumptions: {},
+  budgetSalesExpandedMonth: "",
+  budgetSalesDetailMonth: "",
+  budgetSalesProjectionMonth: "",
+  budgetSalesWeekProjectionMonth: "",
+  budgetSalesGuideOpen: false,
 };
 let expandedTable = null;
 let sharedReportVersion = "";
@@ -67,6 +77,25 @@ let reportPolling = null;
 let localPreviewSource = null;
 let localPreviewModel = null;
 let lastActivityKey = "";
+
+function readSavedLocalPreviewMaster() {
+  if (!localPreviewMode) return null;
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(localPreviewMasterStorageKey) || "");
+    return isMasterReportModel(saved?.model) ? saved : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function saveLocalPreviewMaster(model, sourceName) {
+  if (!localPreviewMode || !isMasterReportModel(model)) return;
+  try {
+    window.localStorage.setItem(localPreviewMasterStorageKey, JSON.stringify({ model, sourceName, savedAt: new Date().toISOString() }));
+  } catch (error) {
+    console.warn("The local Master Sheet could not be retained after refresh.", error);
+  }
+}
 
 function requestedStartSection() {
   return new URLSearchParams(location.search).get("open") === "tasks" ? "tasks" : "hub";
@@ -427,7 +456,7 @@ function renderHub() {
       </button>` : ""}
       ${canViewProfitPlan() ? `<button class="hub-menu-card hub-menu-card--profit-plan" type="button" data-section="profit-plan">
         <span class="hub-menu-card__icon" aria-hidden="true">↟</span>
-        <span><strong>Profit Improvement Plan</strong><small>Set priorities, track actions and measure the profit improvement delivered</small></span>
+        <span><strong>Budget &amp; targets</strong><small>Upload the annual budget and track it against weekly results</small></span>
         <span class="hub-menu-card__arrow" aria-hidden="true">›</span>
       </button>` : ""}
     </section>
@@ -537,7 +566,7 @@ function executiveYears() {
 function executiveFinancialYear(week) {
   const year = Number(week.slice(0, 4));
   const month = Number(week.slice(5, 7));
-  const startYear = month >= 4 ? year : year - 1;
+  const startYear = month >= 5 ? year : year - 1;
   return `${startYear}/${String(startYear + 1).slice(-2)}`;
 }
 
@@ -1208,7 +1237,7 @@ function renderExecutiveDashboard() {
   return `<section class="executive-page">
     <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
     <div class="executive-hero"><p class="eyebrow">LARDER EXECUTIVE DASHBOARD</p><h2>Business trajectory</h2><p>See how volume, value, margin and labour have moved together—and which indicators are shaping the next few months.</p><img class="executive-hero__logo" src="./assets/larder-logo.png" alt="Larder Brasserie and Grill" /></div>
-    <section class="executive-controls" aria-label="Executive dashboard period"><label>View by<select data-action="executive-grain"><option value="month" ${grain === "month" ? "selected" : ""}>Month</option><option value="quarter" ${grain === "quarter" ? "selected" : ""}>Quarter</option><option value="year" ${grain === "year" ? "selected" : ""}>Calendar year</option><option value="financial-year" ${grain === "financial-year" ? "selected" : ""}>Financial year (Apr–Mar)</option><option value="latest-13" ${grain === "latest-13" ? "selected" : ""}>Latest 13 weeks</option><option value="all" ${grain === "all" ? "selected" : ""}>All available data</option></select></label>${periodOptions.length ? `<label>Period<select data-action="executive-period">${periodOptions.map((option) => `<option value="${escapeHtml(option.value)}" ${selectedPeriod === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select></label>` : ""}<button class="executive-scenario-button" type="button" data-action="open-executive-scenario"><span aria-hidden="true">∑</span> Scenario planner</button><p><strong>${escapeHtml(executivePeriodTitle())}</strong><span>${rows.length} reporting weeks · ${comparisonNote}</span></p></section>
+    <section class="executive-controls" aria-label="Executive dashboard period"><label>View by<select data-action="executive-grain"><option value="month" ${grain === "month" ? "selected" : ""}>Month</option><option value="quarter" ${grain === "quarter" ? "selected" : ""}>Quarter</option><option value="year" ${grain === "year" ? "selected" : ""}>Calendar year</option><option value="financial-year" ${grain === "financial-year" ? "selected" : ""}>Financial year (May–Apr)</option><option value="latest-13" ${grain === "latest-13" ? "selected" : ""}>Latest 13 weeks</option><option value="all" ${grain === "all" ? "selected" : ""}>All available data</option></select></label>${periodOptions.length ? `<label>Period<select data-action="executive-period">${periodOptions.map((option) => `<option value="${escapeHtml(option.value)}" ${selectedPeriod === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select></label>` : ""}<button class="executive-scenario-button" type="button" data-action="open-executive-scenario"><span aria-hidden="true">∑</span> Scenario planner</button><p><strong>${escapeHtml(executivePeriodTitle())}</strong><span>${rows.length} reporting weeks · ${comparisonNote}</span></p></section>
     <section class="executive-kpis" aria-label="Executive key performance indicators">
       ${renderExecutiveKpi({ id: "sales-ex", label: "Sales ex VAT", key: "salesEx", kind: "currency", aggregate: "sum", basis: "Total for selected period", valueToggle: true, valueToggleLabel: "£ change", rows, comparisonRows })}
       ${renderExecutiveKpi({ id: "total-covers", label: "Total covers", key: "covers", kind: "number", aggregate: "sum", basis: "Total covers in selected period", rows, comparisonRows })}
@@ -1248,7 +1277,7 @@ const profitPlanKpis = [
 const localAccountantBudget = localPreviewMode ? {
   financialYear: "2026/27",
   periodLabel: "May 2026 – April 2027",
-  sourceLabel: "Accountant budget · original 2026/27 plan",
+  sourceLabel: "Budget · original 2026/27 plan",
   priorActual: {
     sales: 901838.27,
     grossProfit: 608257.11,
@@ -1308,10 +1337,15 @@ function profitPlanAccountingYear(week) {
 }
 
 function profitPlanYears() {
-  return [...new Set(executiveRows().map((row) => profitPlanAccountingYear(row.week)))].sort();
+  return [...new Set([
+    ...executiveRows().map((row) => profitPlanAccountingYear(row.week)),
+    state.profitPlanBudget?.financialYear,
+    localAccountantBudget?.financialYear,
+  ].filter(Boolean))].sort();
 }
 
 function profitPlanBudgetForYear(year) {
+  if (state.profitPlanBudget?.financialYear === year) return state.profitPlanBudget;
   return localAccountantBudget?.financialYear === year ? localAccountantBudget : null;
 }
 
@@ -1446,21 +1480,22 @@ function profitPlanSignedCurrency(value) {
 
 function renderProfitPlanBudget(year) {
   const budget = profitPlanBudgetForYear(year);
-  if (!budget) return `<section class="profit-plan-panel profit-budget-empty"><div class="profit-plan-panel__heading"><div><p class="eyebrow">YOUR BUDGET</p><h3>Set the financial starting point</h3><p>When the accountant budget is connected, this page will show the annual target, the monthly sales plan and the gap to close.</p></div></div></section>`;
-  const salesGrowth = budget.annual.sales - budget.priorActual.sales;
-  const grossProfitGrowth = budget.annual.grossProfit - budget.priorActual.grossProfit;
-  const operatingCostSaving = budget.priorActual.operatingCosts - budget.annual.operatingCosts;
-  const operatingProfitImprovement = budget.annual.operatingProfit - budget.priorActual.operatingProfit;
-  return `<section class="profit-budget" aria-label="2026/27 accountant budget">
+  if (!budget) return `<section class="profit-plan-panel profit-budget-empty"><div class="profit-plan-panel__heading"><div><p class="eyebrow">YOUR BUDGET</p><h3>Set the financial starting point</h3><p>When the budget is connected, this page will show the annual target, the monthly sales plan and the gap to close.</p></div></div></section>`;
+  const priorActual = budget.priorActual || null;
+  const salesGrowth = priorActual ? budget.annual.sales - priorActual.sales : null;
+  const grossProfitGrowth = priorActual ? budget.annual.grossProfit - priorActual.grossProfit : null;
+  const operatingCostSaving = priorActual ? priorActual.operatingCosts - budget.annual.operatingCosts : null;
+  const operatingProfitImprovement = priorActual ? budget.annual.operatingProfit - priorActual.operatingProfit : null;
+  return `<section class="profit-budget" aria-label="${escapeHtml(budget.financialYear)} accountant budget">
     <div class="profit-budget__heading"><div><p class="eyebrow">YOUR FINANCIAL PLAN</p><h3>${escapeHtml(budget.financialYear)} budget in one view</h3><p>${escapeHtml(budget.periodLabel)} · ${escapeHtml(budget.sourceLabel)}</p></div><span>May–April</span></div>
-    <div class="profit-budget__journey"><div><span>Last year’s actual</span><strong>${executiveFormat(budget.priorActual.operatingProfit, "currency")}</strong><small>Operating loss</small></div><i>→</i><div><span>Improvement needed</span><strong>${executiveFormat(operatingProfitImprovement, "currency")}</strong><small>To reach the budget</small></div><i>→</i><div><span>This year’s target</span><strong>${executiveFormat(budget.annual.operatingProfit, "currency")}</strong><small>Operating profit</small></div></div>
+    ${priorActual ? `<div class="profit-budget__journey"><div><span>Last year’s actual</span><strong>${executiveFormat(priorActual.operatingProfit, "currency")}</strong><small>${priorActual.operatingProfit < 0 ? "Operating loss" : "Operating profit"}</small></div><i>→</i><div><span>Improvement needed</span><strong>${executiveFormat(operatingProfitImprovement, "currency")}</strong><small>To reach the budget</small></div><i>→</i><div><span>This year’s target</span><strong>${executiveFormat(budget.annual.operatingProfit, "currency")}</strong><small>Operating profit</small></div></div>` : `<p class="profit-budget__missing-prior">Prior-year actuals were not found in this workbook. The annual budget is loaded; add a previous actuals tab to show the full improvement journey.</p>`}
     <div class="profit-budget__cards">
-      ${renderProfitPlanSummaryCard("Sales budget", executiveFormat(budget.annual.sales, "currency"), `${profitPlanSignedCurrency(salesGrowth)} vs last year`, "positive")}
+      ${renderProfitPlanSummaryCard("Sales budget", executiveFormat(budget.annual.sales, "currency"), priorActual ? `${profitPlanSignedCurrency(salesGrowth)} vs last year` : "Annual budget", "positive")}
       ${renderProfitPlanSummaryCard("Gross profit", executiveFormat(budget.annual.grossProfit, "currency"), `${executiveFormat(budget.annual.overallGpPercent, "percentage")} target`, "positive")}
       ${renderProfitPlanSummaryCard("Labour budget", executiveFormat(budget.annual.labour, "currency"), `${executiveFormat(budget.annual.labourPercent, "percentage")} of sales`, "caution")}
       ${renderProfitPlanSummaryCard("Operating-profit target", executiveFormat(budget.annual.operatingProfit, "currency"), "After labour and operating costs", "positive")}
     </div>
-    <div class="profit-budget__drivers"><article><span>Sales growth</span><strong>${profitPlanSignedCurrency(salesGrowth)}</strong><small>Budgeted turnover above last year</small></article><article><span>Gross-profit gain</span><strong>${profitPlanSignedCurrency(grossProfitGrowth)}</strong><small>Sales and margin combined</small></article><article><span>Operating-cost reduction</span><strong>${profitPlanSignedCurrency(operatingCostSaving)}</strong><small>Including labour in the accountant model</small></article></div>
+    ${priorActual ? `<div class="profit-budget__drivers"><article><span>Sales growth</span><strong>${profitPlanSignedCurrency(salesGrowth)}</strong><small>Budgeted turnover above last year</small></article><article><span>Gross-profit gain</span><strong>${profitPlanSignedCurrency(grossProfitGrowth)}</strong><small>Sales and margin combined</small></article><article><span>Operating-cost reduction</span><strong>${profitPlanSignedCurrency(operatingCostSaving)}</strong><small>Including labour in the accountant model</small></article></div>` : ""}
     <details class="profit-budget__months"><summary>View the monthly budget</summary><p>Actual sales come from the weekly Master Sheet. Only completed months receive a variance; the latest month is clearly shown as a work-in-progress checkpoint.</p><div class="profit-budget__table-wrap"><table><thead><tr><th>Month</th><th>Sales budget</th><th>Actual sales</th><th>Variance</th><th>Operating-profit budget</th></tr></thead><tbody>${budget.months.map((month) => {
       const monthlyRows = profitPlanFinancialYearRows(year).filter((row) => row.week.startsWith(month.month));
       const actualSales = executiveMetric(monthlyRows, "salesEx", "sum");
@@ -1472,6 +1507,426 @@ function renderProfitPlanBudget(year) {
       const actualText = Number.isFinite(actualSales) ? `${executiveFormat(actualSales, "currency")}${monthInProgress ? " to date" : ""}` : "Not loaded";
       return `<tr class="profit-budget-month--${tone}"><td>${escapeHtml(month.label)}</td><td>${executiveFormat(month.sales, "currency")}</td><td>${actualText}</td><td>${monthInProgress ? "In progress" : variance === null ? "—" : profitPlanSignedCurrency(variance)}</td><td>${executiveFormat(month.operatingProfit, "currency")}</td></tr>`;
     }).join("")}</tbody></table></div></details>
+  </section>`;
+}
+
+function renderProfitPlanBudgetUpload(year) {
+  const budget = profitPlanBudgetForYear(year);
+  const source = budget ? `<p class="profit-budget-upload__source"><strong>Loaded:</strong> ${escapeHtml(budget.sourceLabel)}<br><span>${escapeHtml(budget.financialYear)} · ${escapeHtml(budget.periodLabel)}</span></p>` : "";
+  return `<section class="profit-budget-upload" aria-label="Budget upload">
+    <div><p class="eyebrow">BUDGET FILE</p><h3>Update the financial plan</h3><p>Drag in the Excel budget. We read the 12 monthly P&amp;L values and use them only in this local Profit Plan preview.</p>${source}</div>
+    <button class="profit-budget-upload__drop" type="button" data-action="choose-budget-upload"><span aria-hidden="true">⇧</span><strong>Drop the budget here</strong><small>or choose an Excel file</small></button>
+    <p class="profit-budget-upload__note">Looks for a May–April budget with Total Turnover, Gross Profit, Total Labour Cost and Operating Profit. This does not replace or publish the weekly Master Sheet.</p>
+  </section>`;
+}
+
+function priorFinancialYear(year) {
+  const startYear = Number(year.slice(0, 4));
+  return Number.isFinite(startYear) ? `${startYear - 1}/${String(startYear).slice(-2)}` : "";
+}
+
+function budgetReportingWeeks(month) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  if (!Number.isFinite(year) || !Number.isFinite(monthNumber)) return [];
+  const first = new Date(Date.UTC(year, monthNumber - 1, 1));
+  const finalDay = new Date(Date.UTC(year, monthNumber, 0));
+  const firstSundayOffset = (7 - first.getUTCDay()) % 7;
+  const weeks = [];
+  for (let date = new Date(Date.UTC(year, monthNumber - 1, 1 + firstSundayOffset)); date <= finalDay; date.setUTCDate(date.getUTCDate() + 7)) {
+    weeks.push(date.toISOString().slice(0, 10));
+  }
+  return weeks;
+}
+
+function budgetPreviousYearSpendPerHead(year) {
+  const rows = profitPlanFinancialYearRows(priorFinancialYear(year));
+  return executiveRatioMetric(rows, { numeratorKey: "salesInc", denominatorKey: "covers" });
+}
+
+function budgetSameMonthLastYearSpendPerHead(month) {
+  const priorMonth = shiftMonth(month, -12);
+  const rows = executiveRows().filter((row) => monthKey(row.week) === priorMonth);
+  return executiveRatioMetric(rows, { numeratorKey: "salesInc", denominatorKey: "covers" });
+}
+
+function budgetFormatSpendPerHead(value) {
+  if (!Number.isFinite(Number(value))) return "—";
+  return new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+}
+
+function budgetMonthEnd(month) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  if (!Number.isFinite(year) || !Number.isFinite(monthNumber)) return "";
+  return new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
+}
+
+function budgetSalesCutoff(year) {
+  const weeks = profitPlanFinancialYearRows(year).map((row) => row.week).filter(Boolean).sort();
+  // Budget & Targets is always a live plan, so it uses the latest actual week
+  // loaded from the Master Sheet rather than the date selected in Weekly Reports.
+  return weeks.at(-1) || "";
+}
+
+function budgetSalesMonthStatus(month, cutoff) {
+  if (!cutoff || cutoff < `${month}-01`) return "future";
+  return cutoff >= budgetMonthEnd(month) ? "complete" : "active";
+}
+
+function budgetSalesPlan(year) {
+  const budget = profitPlanBudgetForYear(year);
+  const annualPreviousYearSpendPerHead = budgetPreviousYearSpendPerHead(year);
+  if (!budget?.months?.length || !Number.isFinite(annualPreviousYearSpendPerHead) || annualPreviousYearSpendPerHead <= 0) return null;
+  const overrides = state.budgetSalesAssumptions?.[year] || {};
+  const cutoff = budgetSalesCutoff(year);
+  const yearRows = profitPlanFinancialYearRows(year);
+  const seedMonths = budget.months.map((month) => {
+    const reportingWeeks = budgetReportingWeeks(month.month);
+    const weekCount = reportingWeeks.length;
+    const priorMonth = shiftMonth(month.month, -12);
+    const sameMonthLastYearSpendPerHead = budgetSameMonthLastYearSpendPerHead(month.month);
+    const hasSameMonthLastYearSpendPerHead = Number.isFinite(sameMonthLastYearSpendPerHead) && sameMonthLastYearSpendPerHead > 0;
+    const startingSpendPerHead = hasSameMonthLastYearSpendPerHead ? sameMonthLastYearSpendPerHead : annualPreviousYearSpendPerHead;
+    // The accountant budget is ex VAT, while SPH is deliberately shown inc VAT
+    // because it is the more familiar operational measure for the team.
+    const defaultCoversPerWeek = weekCount ? (month.sales * 1.2) / startingSpendPerHead / weekCount : 0;
+    const saved = overrides[month.month] || {};
+    const hasCoversOverride = plainText(saved.coversPerWeek) !== "" && Number.isFinite(Number(saved.coversPerWeek)) && Number(saved.coversPerWeek) >= 0;
+    const hasSpendOverride = plainText(saved.spendPerHead) !== "" && Number.isFinite(Number(saved.spendPerHead)) && Number(saved.spendPerHead) > 0;
+    const coversPerWeek = hasCoversOverride ? Number(saved.coversPerWeek) : defaultCoversPerWeek;
+    const spendPerHead = hasSpendOverride ? Number(saved.spendPerHead) : startingSpendPerHead;
+    const baseSalesTarget = coversPerWeek * weekCount * spendPerHead / 1.2;
+    const actualRows = yearRows.filter((row) => monthKey(row.week) === month.month && (!cutoff || row.week <= cutoff));
+    const hasActuals = actualRows.length > 0;
+    const actualSales = executiveMetric(actualRows, "salesEx", "sum") ?? 0;
+    const actualCovers = executiveMetric(actualRows, "covers", "sum") ?? 0;
+    const actualSpendPerHead = executiveRatioMetric(actualRows, { numeratorKey: "salesInc", denominatorKey: "covers" });
+    return {
+      ...month,
+      reportingWeeks,
+      weekCount,
+      defaultCoversPerWeek,
+      priorMonth,
+      startingSpendPerHead,
+      usesAnnualSpendFallback: !hasSameMonthLastYearSpendPerHead,
+      coversPerWeek,
+      spendPerHead,
+      plannedMonthlyCovers: coversPerWeek * weekCount,
+      baseSalesTarget,
+      baseSpendPerHeadTarget: coversPerWeek * weekCount ? baseSalesTarget * 1.2 / (coversPerWeek * weekCount) : null,
+      cutoff,
+      status: budgetSalesMonthStatus(month.month, cutoff),
+      actualRows,
+      hasActuals,
+      actualSales,
+      actualCovers,
+      actualSpendPerHead,
+    };
+  });
+  const completedMonths = seedMonths.filter((month) => month.status === "complete");
+  const remainingMonths = seedMonths.filter((month) => month.status !== "complete");
+  const completedGap = completedMonths.reduce((total, month) => total + month.baseSalesTarget - month.actualSales, 0);
+  const remainingBudgetSales = remainingMonths.reduce((total, month) => total + month.baseSalesTarget, 0);
+  const sharedSalesUplift = remainingBudgetSales ? completedGap / remainingBudgetSales : 0;
+  const months = seedMonths.map((month) => {
+    const reforecastSalesTarget = month.status === "complete" ? month.actualSales : month.baseSalesTarget * (1 + sharedSalesUplift);
+    const reforecastSpendPerHeadTarget = month.plannedMonthlyCovers ? reforecastSalesTarget * 1.2 / month.plannedMonthlyCovers : null;
+    const remainingWeeks = month.reportingWeeks.filter((week) => !cutoff || week > cutoff);
+    const remainingWeekCount = remainingWeeks.length;
+    const remainingSalesNeeded = month.status === "active" ? Math.max(0, reforecastSalesTarget - month.actualSales) : month.status === "future" ? reforecastSalesTarget : 0;
+    const remainingCoversNeeded = month.status === "active" ? Math.max(0, month.plannedMonthlyCovers - month.actualCovers) : month.status === "future" ? month.plannedMonthlyCovers : 0;
+    // The remaining weekly cover target stays at the planned covers-per-week.
+    // Use that same remaining cover total when calculating required SPH so the
+    // weekly Sales, Covers and SPH targets reconcile with each other.
+    const remainingPlannedCovers = month.status === "active" ? month.coversPerWeek * remainingWeekCount : remainingCoversNeeded;
+    const requiredSpendPerHead = remainingPlannedCovers > 0 ? remainingSalesNeeded * 1.2 / remainingPlannedCovers : null;
+    const targetSpendPerHead = month.status === "complete" ? month.baseSpendPerHeadTarget : month.status === "active" ? requiredSpendPerHead : reforecastSpendPerHeadTarget;
+    const weeklyFutureSalesTarget = remainingWeekCount ? remainingSalesNeeded / remainingWeekCount : 0;
+    const weeklyFutureSpendPerHeadTarget = month.status === "active" ? requiredSpendPerHead : month.status === "future" ? reforecastSpendPerHeadTarget : month.baseSpendPerHeadTarget;
+    const actualRowsByWeek = new Map(month.actualRows.map((row) => [row.week, row]));
+    const weekly = month.reportingWeeks.map((week) => {
+      const actual = actualRowsByWeek.get(week);
+      const hasActual = Boolean(actual);
+      const actualSales = hasActual ? executiveValue(actual, "salesEx") : null;
+      const actualCovers = hasActual ? executiveValue(actual, "covers") : null;
+      const actualSpendPerHead = hasActual ? executiveRatioMetric([actual], { numeratorKey: "salesInc", denominatorKey: "covers" }) : null;
+      const pastWeek = Boolean(cutoff && week <= cutoff);
+      return {
+        week,
+        hasActual,
+        pastWeek,
+        actualSales,
+        actualCovers,
+        actualSpendPerHead,
+        targetSales: hasActual || month.status === "complete" ? month.baseSalesTarget / month.weekCount : weeklyFutureSalesTarget,
+        targetCovers: month.coversPerWeek,
+        targetSpendPerHead: hasActual || month.status === "complete" ? month.baseSpendPerHeadTarget : weeklyFutureSpendPerHeadTarget,
+      };
+    });
+    const actualWeekCount = weekly.filter((week) => week.hasActual).length;
+    const summarySalesTarget = month.status === "complete" ? month.baseSalesTarget : reforecastSalesTarget;
+    const summaryCoversTarget = month.plannedMonthlyCovers;
+    const summarySpendPerHeadTarget = month.status === "complete" ? month.baseSpendPerHeadTarget : reforecastSpendPerHeadTarget;
+    const summarySalesValue = month.status === "active" && actualWeekCount ? month.actualSales / actualWeekCount * month.weekCount : month.status === "complete" ? month.actualSales : reforecastSalesTarget;
+    const summaryCoversValue = month.status === "active" && actualWeekCount ? month.actualCovers / actualWeekCount * month.weekCount : month.status === "complete" ? month.actualCovers : month.plannedMonthlyCovers;
+    const summarySpendPerHeadValue = month.status === "active" || month.status === "complete" ? month.actualSpendPerHead : reforecastSpendPerHeadTarget;
+    const reportingProgress = month.status === "active" && month.weekCount ? actualWeekCount / month.weekCount : month.status === "complete" ? 1 : 0;
+    const salesPaceTarget = summarySalesTarget * reportingProgress;
+    const coversPaceTarget = summaryCoversTarget * reportingProgress;
+    return {
+      ...month,
+      reforecastSalesTarget,
+      reforecastSpendPerHeadTarget,
+      remainingWeeks,
+      remainingWeekCount,
+      remainingSalesNeeded,
+      remainingCoversNeeded,
+      remainingPlannedCovers,
+      requiredSpendPerHead,
+      targetSpendPerHead,
+      weekly,
+      actualWeekCount,
+      summarySalesTarget,
+      summaryCoversTarget,
+      summarySpendPerHeadTarget,
+      summarySalesValue,
+      summaryCoversValue,
+      summarySpendPerHeadValue,
+      reportingProgress,
+      salesPaceTarget,
+      coversPaceTarget,
+      monthlySalesTarget: reforecastSalesTarget,
+      weeklySalesTarget: month.status === "active" && remainingWeekCount ? weeklyFutureSalesTarget : reforecastSalesTarget / month.weekCount,
+      variance: reforecastSalesTarget - month.sales,
+    };
+  });
+  const totalSalesTarget = months.reduce((total, month) => total + month.monthlySalesTarget, 0);
+  const totalBudgetSales = months.reduce((total, month) => total + month.sales, 0);
+  return {
+    budget,
+    annualPreviousYearSpendPerHead,
+    cutoff,
+    months,
+    completedMonths: completedMonths.length,
+    remainingMonths: remainingMonths.length,
+    completedGap,
+    sharedSalesUplift,
+    totalBudgetSales,
+    totalSalesTarget,
+    variance: totalSalesTarget - totalBudgetSales,
+  };
+}
+
+function budgetSalesVarianceTone(value) {
+  if (!Number.isFinite(value) || Math.abs(value) < .5) return "on-budget";
+  return value > 0 ? "above-budget" : "below-budget";
+}
+
+function budgetSalesBarTone(value, target, { plan = false } = {}) {
+  if (plan || !Number.isFinite(Number(value)) || !Number.isFinite(Number(target))) return "plan";
+  return budgetSalesVarianceTone(Number(value) - Number(target));
+}
+
+function budgetSalesBarScale(value, target, { scaleTarget = null } = {}) {
+  const reference = Number(scaleTarget);
+  const values = [value, target].map(Number).filter((item) => Number.isFinite(item) && item >= 0);
+  const scale = Number.isFinite(reference) && reference > 0 ? reference : Math.max(...values, 1) * 1.12;
+  return {
+    fill: Number.isFinite(Number(value)) ? Math.min(100, Math.max(0, Number(value) / scale * 100)) : 0,
+    marker: Number.isFinite(Number(target)) ? Math.min(100, Math.max(0, Number(target) / scale * 100)) : 0,
+  };
+}
+
+function budgetSalesBarFormat(value, kind) {
+  return kind === "sph" ? budgetFormatSpendPerHead(value) : executiveFormat(value, kind);
+}
+
+function renderBudgetSalesMonthBar(label, value, target, kind = "number", valueLabel = "Actual", { plan = false, targetLabel = "Target", comparisonLabel = "target", scaleTarget = null } = {}) {
+  const tone = budgetSalesBarTone(value, target, { plan });
+  const { fill, marker } = budgetSalesBarScale(value, target, { scaleTarget });
+  const difference = Number.isFinite(Number(value)) && Number.isFinite(Number(target)) ? Number(value) - Number(target) : null;
+  const change = plan ? "Not started" : difference === null ? "No actuals yet" : Math.abs(difference) < .5 ? `On ${comparisonLabel}` : `${difference > 0 ? "Up" : "Down"} ${budgetSalesBarFormat(Math.abs(difference), kind)} vs ${comparisonLabel}`;
+  const track = plan ? "" : `<i style="width:${fill.toFixed(2)}%"></i><em style="left:${marker.toFixed(2)}%"></em>`;
+  return `<section class="budget-sales-month-bar budget-sales-month-bar--${tone}"><div><span>${escapeHtml(label)}</span><strong>${budgetSalesBarFormat(value, kind)}</strong></div><p><i>${escapeHtml(valueLabel)}</i><b>${escapeHtml(targetLabel)} ${budgetSalesBarFormat(target, kind)}</b></p><div class="budget-sales-month-bar__track" role="img" aria-label="${escapeHtml(label)}: ${plan ? "not started" : `${escapeHtml(valueLabel)} ${budgetSalesBarFormat(value, kind)} against ${escapeHtml(comparisonLabel)} ${budgetSalesBarFormat(target, kind)}`}">${track}</div><small>${escapeHtml(change)}</small></section>`;
+}
+
+function renderBudgetSalesMonthProgress(month) {
+  if (month.status !== "active") return "";
+  const progress = Math.max(0, Math.min(1, Number(month.reportingProgress) || 0));
+  const percentage = Math.round(progress * 100);
+  const completedWeeks = Number(month.actualWeekCount) || 0;
+  const totalWeeks = Number(month.weekCount) || 0;
+  const weekLabel = totalWeeks === 1 ? "reporting week" : "reporting weeks";
+  return `<section class="budget-sales-month__progress" aria-label="Month progress"><div><span>Month progress</span><strong>${completedWeeks} of ${totalWeeks} ${weekLabel} · ${percentage}%</strong></div><div class="budget-sales-month__progress-track" role="progressbar" aria-label="${escapeHtml(month.label)} reporting-week progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percentage}"><i style="width:${percentage}%"></i></div><small>Sales and covers are measured against the same ${percentage}% point of the monthly plan.</small></section>`;
+}
+
+function renderBudgetSalesProjection(month) {
+  if (month.status !== "active") return "";
+  const weekLabel = month.actualWeekCount === 1 ? "reporting week" : "reporting weeks";
+  return `<section class="budget-sales-projection" aria-label="${escapeHtml(month.label)} projected month-end"><header><div><span>Projected month-end</span><strong>Current run-rate forecast</strong></div><small>Based on ${month.actualWeekCount} completed ${weekLabel}; this does not replace the actual-to-date view.</small></header><div class="budget-sales-projection__bars">${renderBudgetSalesMonthBar("Sales ex VAT", month.summarySalesValue, month.summarySalesTarget, "currency", "Projected")}${renderBudgetSalesMonthBar("Covers", month.summaryCoversValue, month.summaryCoversTarget, "number", "Projected")}${renderBudgetSalesMonthBar("SPH inc VAT", month.summarySpendPerHeadValue, month.summarySpendPerHeadTarget, "sph", "Current actual")}</div></section>`;
+}
+
+function renderBudgetSalesWeeklyBar(label, value, target, kind = "number", { projected = false } = {}) {
+  const hasValue = value !== null && value !== "" && Number.isFinite(Number(value));
+  const tone = budgetSalesBarTone(value, target, { plan: !hasValue });
+  const { fill, marker } = hasValue ? budgetSalesBarScale(value, target) : { fill: 0, marker: 0 };
+  const track = hasValue ? `<i style="width:${fill.toFixed(2)}%"></i><em style="left:${marker.toFixed(2)}%"></em>` : "";
+  const valueLabel = projected ? "projected" : "actual";
+  return `<div class="budget-sales-week__metric budget-sales-week__metric--${tone}"><div><dt>${escapeHtml(label)}</dt><dd>${hasValue ? budgetSalesBarFormat(value, kind) : "—"}<small>Target ${budgetSalesBarFormat(target, kind)}</small></dd></div><div class="budget-sales-week__track" role="img" aria-label="${escapeHtml(label)}: ${hasValue ? `${valueLabel} ${budgetSalesBarFormat(value, kind)} against target ${budgetSalesBarFormat(target, kind)}` : "not started"}">${track}</div></div>`;
+}
+
+function renderBudgetSalesMetric(label, actual, target, detail, kind = "number") {
+  return `<div class="budget-sales-month__metric ${actual === null ? "budget-sales-month__metric--waiting" : ""}"><span>${escapeHtml(label)}</span><strong>${actual === null ? "—" : kind === "sph" ? budgetFormatSpendPerHead(actual) : executiveFormat(actual, kind)}</strong><small>${escapeHtml(detail || `Target ${kind === "sph" ? budgetFormatSpendPerHead(target) : executiveFormat(target, kind)}`)}</small></div>`;
+}
+
+function budgetSalesSummaryFormat(value, kind) {
+  return kind === "sph" ? budgetFormatSpendPerHead(value) : executiveFormat(value, kind);
+}
+
+function renderBudgetSalesSummaryBar(label, value, target, kind = "number", valueLabel = "Actual", { notStarted = false } = {}) {
+  const validValue = Number.isFinite(Number(value));
+  const validTarget = Number.isFinite(Number(target)) && Number(target) > 0;
+  const difference = validValue && validTarget ? Number(value) - Number(target) : null;
+  const tone = notStarted || difference === null ? "plan" : Math.abs(difference) < .5 ? "on-plan" : difference > 0 ? "ahead" : "behind";
+  const scale = validValue && validTarget ? Math.max(Number(value), Number(target)) * 1.12 : validTarget ? Number(target) * 1.12 : 1;
+  const fill = validValue ? Math.min(100, Math.max(0, Number(value) / scale * 100)) : 0;
+  const marker = validTarget ? Math.min(100, Math.max(0, Number(target) / scale * 100)) : 0;
+  const change = notStarted ? "Not started — reforecast plan" : difference === null ? "No actuals yet" : Math.abs(difference) < .5 ? "On target" : `${difference > 0 ? "Up" : "Down"} ${budgetSalesSummaryFormat(Math.abs(difference), kind)} vs target`;
+  return `<article class="budget-sales-summary__bar budget-sales-summary__bar--${tone}"><div><span>${escapeHtml(label)}</span><strong>${budgetSalesSummaryFormat(value, kind)}</strong></div><p><i>${escapeHtml(valueLabel)}</i><b>Target ${budgetSalesSummaryFormat(target, kind)}</b></p><div class="budget-sales-summary__track" role="img" aria-label="${escapeHtml(label)}: ${escapeHtml(valueLabel)} ${budgetSalesSummaryFormat(value, kind)} against target ${budgetSalesSummaryFormat(target, kind)}"><i style="width:${fill.toFixed(2)}%"></i><em style="left:${marker.toFixed(2)}%"></em></div><small>${escapeHtml(change)}</small></article>`;
+}
+
+function renderBudgetSalesMonthlySummary(month) {
+  const mode = month.status === "active" ? "Projected month-end" : month.status === "complete" ? "Final month actuals" : "Reforecast monthly plan";
+  const description = month.status === "active" ? `Projection uses the average of ${month.actualWeekCount} completed ${month.actualWeekCount === 1 ? "reporting week" : "reporting weeks"}.` : month.status === "complete" ? "Actual performance against the original monthly plan." : "The plan reflects any sales gap shared from completed months.";
+  const valueLabel = month.status === "active" ? "Projected" : month.status === "complete" ? "Actual" : "Reforecast";
+  const notStarted = month.status === "future";
+  return `<section class="budget-sales-summary" aria-label="${escapeHtml(month.label)} monthly summary"><div class="budget-sales-summary__heading"><div><p class="eyebrow">MONTHLY SUMMARY</p><h3>${escapeHtml(mode)}</h3></div><p>${escapeHtml(description)}</p></div><div class="budget-sales-summary__bars">${renderBudgetSalesSummaryBar("Sales ex VAT", month.summarySalesValue, month.summarySalesTarget, "currency", valueLabel, { notStarted })}${renderBudgetSalesSummaryBar("Covers", month.summaryCoversValue, month.summaryCoversTarget, "number", valueLabel, { notStarted })}${renderBudgetSalesSummaryBar("SPH inc VAT", month.summarySpendPerHeadValue, month.summarySpendPerHeadTarget, "sph", valueLabel, { notStarted })}</div><p class="budget-sales-summary__key"><i aria-hidden="true"></i>Coloured bar = ${escapeHtml(valueLabel.toLowerCase())}. Light marker = target.</p></section>`;
+}
+
+function renderBudgetSalesWeeks(month) {
+  const remainingNote = month.status === "active" && month.remainingWeekCount ? month.remainingWeekCount === 1 ? "The remaining reporting week now carries the updated target." : `The remaining ${month.remainingWeekCount} reporting weeks now carry the updated target.` : month.status === "complete" ? "Actuals are compared with the original monthly plan." : "Targets include any reforecast shared from completed months.";
+  const canProject = month.status === "active" && month.actualWeekCount > 0 && month.remainingWeekCount > 0;
+  const projectionOpen = state.budgetSalesWeekProjectionMonth === month.month;
+  const futureWeeks = month.weekly.filter((week) => !week.hasActual && !week.pastWeek);
+  const distributeProjection = (forecast, actual) => {
+    if (!futureWeeks.length) return [];
+    const remaining = Math.round(forecast) - Math.round(actual);
+    const base = Math.trunc(remaining / futureWeeks.length);
+    const extra = Math.abs(remaining - base * futureWeeks.length);
+    const direction = remaining < 0 ? -1 : 1;
+    return futureWeeks.map((week, index) => ({ week: week.week, value: base + (index < extra ? direction : 0) }));
+  };
+  const projectedSalesByWeek = new Map(distributeProjection(month.summarySalesValue, month.actualSales).map((item) => [item.week, item.value]));
+  const projectedCoversByWeek = new Map(distributeProjection(month.summaryCoversValue, month.actualCovers).map((item) => [item.week, item.value]));
+  return `<section class="budget-sales-weeks" aria-label="${escapeHtml(month.label)} weekly breakdown"><div class="budget-sales-weeks__heading"><strong>Weekly breakdown</strong><span>${escapeHtml(remainingNote)}</span></div>${canProject ? `<button class="budget-sales-weeks__projection-button" type="button" data-action="toggle-budget-sales-week-projection" data-month="${escapeHtml(month.month)}" aria-expanded="${projectionOpen}">${projectionOpen ? "Hide projected remaining weeks" : `View projection for ${month.remainingWeekCount} remaining ${month.remainingWeekCount === 1 ? "week" : "weeks"}`}<b aria-hidden="true">${projectionOpen ? "−" : "+"}</b></button>${projectionOpen ? `<p class="budget-sales-weeks__projection-note">These figures use the same current run rate as the projected month-end view.</p>` : ""}` : ""}<div class="budget-sales-weeks__list">${month.weekly.map((week) => {
+    const projected = projectionOpen && !week.hasActual && !week.pastWeek;
+    const status = week.hasActual ? "Actual" : projected ? "Projected" : week.pastWeek ? "Awaiting data" : "Target";
+    const sales = projected ? projectedSalesByWeek.get(week.week) : week.actualSales;
+    const covers = projected ? projectedCoversByWeek.get(week.week) : week.actualCovers;
+    const spendPerHead = projected ? month.actualSpendPerHead : week.actualSpendPerHead;
+    return `<article class="budget-sales-week budget-sales-week--${week.hasActual ? "actual" : projected ? "projected" : week.pastWeek ? "missing" : "future"}"><header><span>${escapeHtml(formatDate(week.week, true))}</span><b>${status}</b></header><dl>${renderBudgetSalesWeeklyBar("Sales ex VAT", sales, week.targetSales, "currency", { projected })}${renderBudgetSalesWeeklyBar("Covers", covers, week.targetCovers, "number", { projected })}${renderBudgetSalesWeeklyBar("SPH inc VAT", spendPerHead, week.targetSpendPerHead, "sph", { projected })}</dl></article>`;
+  }).join("")}</div></section>`;
+}
+
+function budgetSalesMonthPresentation(month) {
+  const varianceTone = budgetSalesVarianceTone(month.variance);
+  const expanded = state.budgetSalesExpandedMonth === month.month;
+  const varianceText = varianceTone === "on-budget" ? "Matches budget" : `${month.variance > 0 ? "Up" : "Down"} ${executiveFormat(Math.abs(month.variance), "currency")} vs original budget`;
+  const startingSpendText = month.usesAnnualSpendFallback
+    ? `Annual previous-year SPH used: ${budgetFormatSpendPerHead(month.startingSpendPerHead)} inc VAT`
+    : `${accountantBudgetMonthLabel(month.priorMonth)} average SPH: ${budgetFormatSpendPerHead(month.startingSpendPerHead)} inc VAT`;
+  const isComplete = month.status === "complete";
+  const isActive = month.status === "active";
+  const targetSalesLabel = isComplete ? "Original plan" : isActive ? "Current reforecast" : "Reforecast";
+  const salesDetail = month.hasActuals ? `${targetSalesLabel} ${executiveFormat(isComplete ? month.baseSalesTarget : month.reforecastSalesTarget, "currency")}` : `Budget ${executiveFormat(month.sales, "currency")}`;
+  const coversDetail = `Plan ${executiveFormat(month.plannedMonthlyCovers)} covers`;
+  const spendDetail = isActive
+    ? month.remainingSalesNeeded <= 0 ? "Sales target already met" : `Need ${budgetFormatSpendPerHead(month.targetSpendPerHead)} for ${month.remainingWeekCount} remaining ${month.remainingWeekCount === 1 ? "week" : "weeks"}`
+    : isComplete ? `Budget target ${budgetFormatSpendPerHead(month.targetSpendPerHead)}` : `Reforecast target ${budgetFormatSpendPerHead(month.targetSpendPerHead)}`;
+  const statusText = isComplete ? "Completed month" : isActive ? `Live to ${formatDate(month.cutoff, true)}` : "Not started";
+  const statusTarget = isActive ? `${executiveFormat(month.remainingSalesNeeded, "currency")} sales still required` : !isComplete && Math.abs(month.reforecastSalesTarget - month.baseSalesTarget) >= .5 ? `${month.reforecastSalesTarget > month.baseSalesTarget ? "Up" : "Down"} ${executiveFormat(Math.abs(month.reforecastSalesTarget - month.baseSalesTarget), "currency")} from the monthly plan` : `${month.weekCount} reporting weeks`;
+  return { varianceTone, expanded, varianceText, startingSpendText, isComplete, isActive, targetSalesLabel, salesDetail, coversDetail, spendDetail, statusText, statusTarget };
+}
+
+function budgetSalesMonthHasOverrides(year, month) {
+  const assumptions = state.budgetSalesAssumptions?.[year]?.[month] || {};
+  return ["coversPerWeek", "spendPerHead"].some((field) => plainText(assumptions[field]) !== "");
+}
+
+function renderBudgetSalesMonth(month) {
+  const view = budgetSalesMonthPresentation(month);
+  const plan = month.status === "future";
+  const live = view.isActive;
+  const salesValue = live ? month.actualSales : month.summarySalesValue;
+  const salesTarget = live ? month.salesPaceTarget : month.summarySalesTarget;
+  const coversValue = live ? month.actualCovers : month.summaryCoversValue;
+  const coversTarget = live ? month.coversPaceTarget : month.summaryCoversTarget;
+  const salesTone = budgetSalesBarTone(salesValue, salesTarget, { plan });
+  const valueLabel = view.isComplete ? "Actual" : live ? "Actual to date" : "Planned";
+  const headlineSales = live ? month.actualSales : view.isComplete ? month.summarySalesValue : month.monthlySalesTarget;
+  const headlineLabel = view.isComplete ? "Actual sales ex VAT" : live ? "Actual sales ex VAT to date" : "Sales target ex VAT";
+  const projectionOpen = state.budgetSalesProjectionMonth === month.month;
+  const salesPaceOptions = { targetLabel: "Pace", comparisonLabel: "pace", scaleTarget: month.summarySalesTarget };
+  const coversPaceOptions = { targetLabel: "Pace", comparisonLabel: "pace", scaleTarget: month.summaryCoversTarget };
+  return `<article class="budget-sales-month budget-sales-month--${salesTone}" data-budget-month="${escapeHtml(month.month)}">
+    <button class="budget-sales-month__toggle" type="button" data-action="open-budget-sales-month" data-month="${escapeHtml(month.month)}"><div class="budget-sales-month__heading"><div><span>${escapeHtml(month.label)}</span><strong>${executiveFormat(headlineSales, "currency")}</strong><small>${headlineLabel}</small></div><div><span>Budget ex VAT</span><b>${executiveFormat(month.sales, "currency")}</b><small>Open month ›</small></div></div>
+      <div class="budget-sales-month__week"><span>${escapeHtml(view.statusText)}</span><strong>${escapeHtml(view.statusTarget)}</strong></div>
+      ${renderBudgetSalesMonthProgress(month)}
+      <div class="budget-sales-month__bars">${renderBudgetSalesMonthBar("Sales ex VAT", salesValue, salesTarget, "currency", valueLabel, live ? salesPaceOptions : { plan })}${renderBudgetSalesMonthBar("Covers", coversValue, coversTarget, "number", valueLabel, live ? coversPaceOptions : { plan })}${renderBudgetSalesMonthBar("SPH inc VAT", month.summarySpendPerHeadValue, month.summarySpendPerHeadTarget, "sph", valueLabel, { plan })}</div>
+      <p class="budget-sales-month__open">Open the month for weekly performance and planning controls <b aria-hidden="true">›</b></p>
+    </button>
+    ${live ? `<button class="budget-sales-month__projection-button" type="button" data-action="toggle-budget-sales-projection" data-month="${escapeHtml(month.month)}" aria-expanded="${projectionOpen}">${projectionOpen ? "Hide projected month-end" : "View projected month-end"}<b aria-hidden="true">${projectionOpen ? "−" : "+"}</b></button>${projectionOpen ? renderBudgetSalesProjection(month) : ""}` : ""}
+  </article>`;
+}
+
+function renderBudgetSalesMonthPage() {
+  const year = profitPlanSelectedYear();
+  const plan = budgetSalesPlan(year);
+  const month = plan?.months.find((item) => item.month === state.budgetSalesDetailMonth);
+  if (!month) return `<section class="budget-sales-detail-page"><button class="back-link" type="button" data-action="return-budget-sales-plan">&larr; Budget &amp; targets</button><div class="page-intro"><p class="eyebrow">MONTHLY PLAN</p><h2>Month not available</h2><p>Return to Budget &amp; Targets to choose a month.</p></div></section>`;
+  const view = budgetSalesMonthPresentation(month);
+  const live = view.isActive;
+  const detailHeadline = live ? month.actualSales : view.isComplete ? month.summarySalesValue : month.monthlySalesTarget;
+  const detailHeadlineLabel = view.isComplete ? "Actual sales ex VAT" : live ? "Actual sales ex VAT to date" : "Sales target ex VAT";
+  const projectionOpen = state.budgetSalesProjectionMonth === month.month;
+  const hasOverrides = budgetSalesMonthHasOverrides(year, month.month);
+  return `<section class="budget-sales-detail-page">
+    <button class="back-link" type="button" data-action="return-budget-sales-plan">&larr; Budget &amp; targets</button>
+    <div class="page-intro"><p class="eyebrow">${escapeHtml(year)} MONTHLY PLAN</p><h2>${escapeHtml(monthTitle(month.month))}</h2><p>Review the month’s actuals, the target still required and each reporting week in one place.</p></div>
+    <section class="budget-sales-month-detail" aria-label="${escapeHtml(month.label)} budget detail">
+      <div class="budget-sales-month__heading"><div><span>${escapeHtml(month.label)}</span><strong>${executiveFormat(detailHeadline, "currency")}</strong><small>${detailHeadlineLabel}</small></div><div><span>Budget ex VAT</span><b>${executiveFormat(month.sales, "currency")}</b></div></div>
+      <div class="budget-sales-month__week"><span>${escapeHtml(view.statusText)}</span><strong>${escapeHtml(view.statusTarget)}</strong></div>
+      ${renderBudgetSalesMonthProgress(month)}
+      ${live ? `<button class="budget-sales-month__projection-button" type="button" data-action="toggle-budget-sales-projection" data-month="${escapeHtml(month.month)}" aria-expanded="${projectionOpen}">${projectionOpen ? "Hide projected month-end" : "View projected month-end"}<b aria-hidden="true">${projectionOpen ? "−" : "+"}</b></button>${projectionOpen ? renderBudgetSalesProjection(month) : ""}` : ""}
+      <p class="budget-sales-month__basis">Starting point: ${escapeHtml(view.startingSpendText)}</p>
+      <div class="budget-sales-month__inputs"><label>Planning covers / week<input type="number" min="0" step="1" inputmode="numeric" data-action="budget-sales-input" data-month="${escapeHtml(month.month)}" data-field="coversPerWeek" value="${month.coversPerWeek.toFixed(1)}"></label><label>Starting SPH inc VAT (£)<input type="number" min="0.01" step="0.01" inputmode="decimal" data-action="budget-sales-input" data-month="${escapeHtml(month.month)}" data-field="spendPerHead" value="${month.spendPerHead.toFixed(2)}"></label></div>
+      <p class="budget-sales-month__input-help">Changes apply when you tap outside the field or press Return.</p>
+      ${hasOverrides ? `<button class="budget-sales-month__reset-button" type="button" data-action="reset-budget-sales-month" data-month="${escapeHtml(month.month)}">Return to budget <small>Keeps any sales reforecast from completed months</small></button>` : ""}
+      <p class="budget-sales-month__variance budget-sales-month__variance--${view.varianceTone}">${escapeHtml(view.varianceText)}</p>
+      ${renderBudgetSalesWeeks(month)}
+    </section>
+  </section>`;
+}
+
+function renderBudgetSalesGuide() {
+  return `<section class="budget-sales-guide" aria-label="How Total Sales works"><header><div><span>HOW TOTAL SALES WORKS</span><strong>A simple guide</strong></div><button type="button" data-action="toggle-budget-sales-guide" aria-label="Close Total Sales guide">×</button></header><ol><li><strong>Budget first.</strong> Each month starts with its sales budget. The starting covers target uses that month’s spend per head from the previous financial year.</li><li><strong>Read the month status.</strong> Completed months show final actuals. A live month shows actuals to date against the same point in the plan. Future months and weeks are targets only, so their bars stay empty.</li><li><strong>Keep the annual plan whole.</strong> When a month closes above or below budget, the gap is applied as the same percentage uplift or reduction across all remaining monthly budgets.</li><li><strong>Use projections as a guide.</strong> In a live month, projected month-end and projected remaining weeks use the current run rate. They never change the budget or actual results.</li><li><strong>Adjust with care.</strong> You can change planned Covers per week or starting SPH. “Return to budget” removes your manual change but keeps any uplift or reduction already carried forward from completed months.</li></ol><p><strong>Remember:</strong> sales figures are ex VAT; SPH is shown inc VAT because it is easier to use operationally.</p></section>`;
+}
+
+function renderBudgetSalesPlan(year) {
+  const plan = budgetSalesPlan(year);
+  if (!plan) return `<section class="budget-sales-plan budget-sales-plan--empty"><div><p class="eyebrow">TOTAL SALES</p><h3>Sales budget needs last year’s cover data</h3><p>Upload a Master Performance Sheet with the previous financial year’s sales and covers to calculate the starting weekly covers target.</p></div></section>`;
+  const previousYear = priorFinancialYear(year);
+  const totalTone = budgetSalesVarianceTone(plan.variance);
+  const totalVariance = totalTone === "on-budget" ? "Matches budget" : `${plan.variance > 0 ? "Up" : "Down"} ${executiveFormat(Math.abs(plan.variance), "currency")} vs budget`;
+  const completedNote = !plan.completedMonths ? "No completed months yet, so every month is still on its original plan." : !plan.remainingMonths ? `All months are complete. Final completed-month variance: ${plan.completedGap >= 0 ? "down" : "up"} ${executiveFormat(Math.abs(plan.completedGap), "currency")}.` : plan.completedGap === 0 ? "Completed months match plan, so the remaining months are unchanged." : `${plan.completedGap > 0 ? "Down" : "Up"} ${executiveFormat(Math.abs(plan.completedGap), "currency")} from completed months is applied as an even ${Math.abs(plan.sharedSalesUplift * 100).toFixed(1)}% ${plan.completedGap > 0 ? "uplift" : "reduction"} across the remaining monthly budgets.`;
+  const guideOpen = Boolean(state.budgetSalesGuideOpen);
+  return `<section class="budget-sales-plan" aria-label="Total sales budget">
+    <div class="budget-sales-plan__heading"><div><p class="eyebrow">TOTAL SALES</p><h3>Turn the sales budget into a live monthly plan</h3><p>See actual sales, covers and SPH against each month’s plan. Once a month closes, any sales gap is applied as the same percentage uplift or reduction across the remaining monthly budgets.</p></div><div class="budget-sales-plan__actions"><button type="button" data-action="toggle-budget-sales-guide" aria-expanded="${guideOpen}">ⓘ How this works</button><button type="button" data-action="reset-budget-sales-plan">Reset to budget</button></div></div>
+    ${guideOpen ? renderBudgetSalesGuide() : ""}
+    <div class="budget-sales-plan__baseline"><div><span>Annual sales budget ex VAT</span><strong>${executiveFormat(plan.totalBudgetSales, "currency")}</strong></div><div><span>Reporting cut-off</span><strong>${plan.cutoff ? escapeHtml(formatDate(plan.cutoff, true)) : "No actuals"}</strong><small>Actuals shown up to this reporting week</small></div><div><span>Starting SPH</span><strong>Same month last year</strong><small>SPH converts to ex VAT for the budget</small></div></div>
+    <div class="budget-sales-plan__months">${plan.months.map(renderBudgetSalesMonth).join("")}</div>
+    <div class="budget-sales-plan__total budget-sales-plan__total--${totalTone}"><div><span>Annual sales forecast ex VAT</span><strong>${executiveFormat(plan.totalSalesTarget, "currency")}</strong><small>${totalVariance}</small></div><div><span>Annual budget ex VAT</span><strong>${executiveFormat(plan.totalBudgetSales, "currency")}</strong></div></div>
+    <p class="budget-sales-plan__reforecast">${escapeHtml(completedNote)}</p>
+    <p class="budget-sales-plan__note">Each month starts with that same calendar month’s actual SPH from ${escapeHtml(previousYear)}. SPH is shown including VAT, then converted to ex VAT so sales reconcile with the budget. Change the planning covers or starting SPH when needed; live SPH targets then recalculate from actuals and the sales still required.</p>
   </section>`;
 }
 
@@ -1538,44 +1993,18 @@ function renderProfitPlanReview(plan, year) {
 
 function renderProfitImprovementPlan() {
   const years = profitPlanYears();
-  if (!years.length) return `<section class="profit-plan-page"><button class="back-link" type="button" data-section="hub">&larr; Information Hub</button><div class="page-intro"><p class="eyebrow">PROFIT IMPROVEMENT PLAN</p><h2>Build a better year</h2><p>Upload the full Master Performance Sheet to start a financial-year profit plan.</p></div></section>`;
+  if (!years.length) return `<section class="profit-plan-page"><button class="back-link" type="button" data-section="hub">&larr; Information Hub</button><div class="page-intro"><p class="eyebrow">BUDGET &amp; TARGETS</p><h2>Set the financial plan</h2><p>Upload the full Master Performance Sheet to begin tracking an annual budget.</p></div></section>`;
   const year = profitPlanSelectedYear();
-  const plan = profitPlanForYear(year);
-  const budget = profitPlanBudgetForYear(year);
   const yearRows = profitPlanFinancialYearRows(year);
-  const previousRows = plan.previousYear ? profitPlanFinancialYearRows(plan.previousYear) : [];
-  const contributionProxy = profitPlanContribution(previousRows);
-  const manualBaseline = profitPlanNumber(plan.baselineOverride);
-  const manualTarget = profitPlanNumber(plan.targetProfit);
-  const baseline = manualBaseline ?? budget?.priorActual.operatingProfit ?? contributionProxy;
-  const target = manualTarget ?? budget?.annual.operatingProfit ?? null;
-  const required = target !== null && baseline !== null ? target - baseline : null;
-  const identified = plan.opportunities.filter((item) => !["cancelled"].includes(item.status)).reduce((total, item) => total + (profitPlanNumber(item.expectedBenefit) || 0), 0);
-  const delivered = profitPlanNumber(plan.confirmedDelivered);
-  const progress = required && required > 0 && delivered !== null ? Math.max(0, Math.min(1, delivered / required)) : null;
-  const activeQuarter = profitPlanCurrentQuarter(year);
-  const activeFocus = plan.quarters?.[activeQuarter] || {};
-  const rankedOpportunities = [...plan.opportunities].sort((left, right) => (profitPlanNumber(right.expectedBenefit) || 0) - (profitPlanNumber(left.expectedBenefit) || 0));
-  const coverageTone = required !== null && required > 0 ? identified >= required ? "positive" : "caution" : "neutral";
   return `<section class="profit-plan-page">
     <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
-    <div class="profit-plan-hero"><p class="eyebrow">PROFIT IMPROVEMENT PLAN</p><h2>Your budget. Your plan. Your result.</h2><p>Start with the accountant’s annual target, use weekly results to see whether it is on track, then focus the team on the changes that close the gap.</p></div>
-    <section class="profit-plan-controls"><label>Plan year<select data-action="profit-plan-year">${years.map((item) => `<option value="${item}" ${item === year ? "selected" : ""}>${item} · May–April</option>`).join("")}</select></label><p><strong>${escapeHtml(year)} plan</strong><span>${yearRows.length} reporting weeks loaded from the Master Performance Sheet</span></p></section>
-    <p class="profit-plan-local-note"><strong>Local prototype:</strong> this accountant budget is visible only in the local preview. Plans, opportunities and review notes are not yet published.</p>
+    <div class="profit-plan-hero"><p class="eyebrow">BUDGET &amp; TARGETS</p><h2>Lay out the budget, properly.</h2><p>Start with the annual sales plan, turn it into monthly and weekly targets, then build the rest of the budget from the same clear structure.</p></div>
+    <section class="profit-plan-controls"><label>Financial year<select data-action="profit-plan-year">${years.map((item) => `<option value="${item}" ${item === year ? "selected" : ""}>${item} · May–April</option>`).join("")}</select></label><p><strong>${escapeHtml(year)} budget</strong><span>${yearRows.length} reporting weeks loaded from the Master Performance Sheet</span></p></section>
+    <p class="profit-plan-local-note"><strong>Local prototype:</strong> the budget file and planning adjustments are visible only in this local preview. They are not published yet.</p>
     ${state.profitPlanMessage ? `<p class="profit-plan-message">${escapeHtml(state.profitPlanMessage)}</p>` : ""}
+    ${renderProfitPlanBudgetUpload(year)}
     ${renderProfitPlanBudget(year)}
-    <section class="profit-plan-summary" aria-label="Annual profit plan summary">
-      ${renderProfitPlanSummaryCard("Starting operating result", baseline === null ? "Set baseline" : executiveFormat(baseline, "currency"), manualBaseline !== null ? "Approved management-account baseline" : budget ? "2025/26 actual operating profit" : plan.previousYear ? `GP after wages proxy · FY ${plan.previousYear}` : "No prior-year baseline available")}
-      ${renderProfitPlanSummaryCard("Operating-profit target", target === null ? "Set target" : executiveFormat(target, "currency"), manualTarget !== null ? "Approved management target" : budget ? "Accountant budget target" : "Enter an approved management target")}
-      ${renderProfitPlanSummaryCard("Improvement to deliver", required === null ? "Set plan inputs" : executiveFormat(required, "currency"), required !== null && required < 0 ? "Target is below the starting result" : "Target less starting result", required !== null && required <= 0 ? "positive" : "neutral")}
-      ${renderProfitPlanSummaryCard("Identified opportunities", executiveFormat(identified, "currency"), required !== null && required > 0 ? `${Math.round((identified / required) * 100)}% of required improvement covered` : "Standalone estimates; may overlap", coverageTone)}
-      ${renderProfitPlanSummaryCard("Confirmed improvement delivered", delivered === null ? "Set after P&L review" : executiveFormat(delivered, "currency"), progress === null ? "Use confirmed management-account result" : `${Math.round(progress * 100)}% of annual target`, progress === null ? "neutral" : progress >= 1 ? "positive" : "caution")}
-    </section>
-    <section class="profit-plan-panel profit-plan-setup"><div class="profit-plan-panel__heading"><div><p class="eyebrow">YOUR ANNUAL TARGET</p><h3>Confirm or revise the plan</h3></div></div><form data-profit-plan-form="summary"><label>Starting operating result (£)<input name="baselineOverride" type="number" inputmode="decimal" step="1" value="${escapeHtml(plan.baselineOverride)}" placeholder="Uses 2025/26 actual if blank"></label><label>Operating-profit target (£)<input name="targetProfit" type="number" inputmode="decimal" step="1" value="${escapeHtml(plan.targetProfit)}" placeholder="Uses accountant budget if blank"></label><label>Confirmed improvement delivered (£)<input name="confirmedDelivered" type="number" inputmode="decimal" step="1" value="${escapeHtml(plan.confirmedDelivered)}" placeholder="Enter after P&L review"></label><button type="submit">Save annual target</button></form><p>The local budget is the default. Only enter a figure here if management agrees a revised starting point or target.</p></section>
-    <section class="profit-plan-bridge"><div><p class="eyebrow">YOUR IMPROVEMENT PLAN</p><h3>Do the planned actions close the gap?</h3><p>Each opportunity is a standalone estimate. Later, the forecast will combine volume, spend, GP and cost drivers in the right order so we do not count the same benefit twice.</p></div><div class="profit-plan-bridge__figures"><span>Starting result<strong>${baseline === null ? "Set baseline" : executiveFormat(baseline, "currency")}</strong></span><i>+</i><span>Planned actions<strong>${executiveFormat(identified, "currency")}</strong></span><i>=</i><span>Target<strong>${target === null ? "Set target" : executiveFormat(target, "currency")}</strong></span></div></section>
-    <section class="profit-plan-opportunities"><div class="profit-plan-panel__heading"><div><p class="eyebrow">PROFIT OPPORTUNITIES</p><h3>Where will the improvement come from?</h3><p>Add a quantified opportunity, then use the quarterly focus to turn it into actions.</p></div></div><form class="profit-opportunity-form" data-profit-opportunity-form><label>Area<select name="category">${profitPlanKpis.map((kpi) => `<option value="${kpi.label}">${escapeHtml(kpi.label)}</option>`).join("")}<option value="Waste">Waste</option><option value="Purchasing">Purchasing</option><option value="Menu pricing">Menu pricing</option><option value="Other">Other</option></select></label><label>Opportunity title<input required name="title" maxlength="120" placeholder="e.g. Raise wine attachment"></label><label>Current baseline<input name="baseline" maxlength="80" placeholder="e.g. £9.80 SPH"></label><label>Target<input name="target" maxlength="80" placeholder="e.g. £10.75 SPH"></label><label>Estimated annual £ benefit<input required name="expectedBenefit" type="number" inputmode="decimal" min="0" step="1" placeholder="0"></label><label>Priority<select name="priority"><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select></label><label>Owner<select name="owner">${profitPlanPeopleOptions()}</select></label><label>Target completion<input name="dueDate" type="date"></label><label class="profit-opportunity-form__wide">Description<textarea name="description" rows="2" placeholder="Why this matters and how the benefit is expected to be achieved."></textarea></label><label class="profit-opportunity-form__wide">Actions required<textarea name="actions" rows="2" placeholder="The practical changes required to deliver it."></textarea></label><button type="submit">Add opportunity</button></form><p class="profit-plan-data-note">Estimated opportunity benefits are deliberately shown as standalone estimates. The combined plan will avoid double-counting volume, spend and GP changes.</p><div class="profit-opportunity-grid">${rankedOpportunities.length ? rankedOpportunities.map(renderProfitPlanOpportunity).join("") : '<p class="profit-plan-empty">No opportunities yet. Start with the clearest commercial or cost opportunity for the year.</p>'}</div></section>
-    <section class="profit-plan-quarterly"><div class="profit-plan-panel__heading"><div><p class="eyebrow">QUARTERLY KPI FOCUS</p><h3>One primary KPI at a time</h3><p>${profitPlanQuarterLabels[activeQuarter]} is the current focus period. Improved levels become the expected operating standard rather than resetting at quarter end.</p></div></div><div class="profit-quarter-grid">${Object.keys(profitPlanQuarterLabels).map((quarter) => renderProfitPlanQuarter(plan, year, quarter)).join("")}</div></section>
-    <div class="profit-plan-detail-grid">${renderProfitPlanReview(plan, year)}${renderProfitPlanWeeklyTracking(plan, year)}</div>
+    ${renderBudgetSalesPlan(year)}
   </section>`;
 }
 
@@ -1816,10 +2245,10 @@ function renderMenu() {
     return;
   }
   if (state.section === "profit-plan") {
-    setDrawerHeading("PROFIT PLAN", "Profit improvement");
+    setDrawerHeading("BUDGET & TARGETS", "Financial plan");
     sectionMenu.innerHTML = [
       `<button class="menu-item" data-section="hub"><span class="menu-item__icon">⌂</span><span>Information Hub</span><span class="menu-item__chevron">›</span></button>`,
-      `<button class="menu-item menu-item--profit-plan is-active" data-section="profit-plan"><span class="menu-item__icon">↟</span><span>Profit Improvement Plan</span><span class="menu-item__chevron">›</span></button>`,
+      `<button class="menu-item menu-item--profit-plan is-active" data-section="profit-plan"><span class="menu-item__icon">↟</span><span>Budget &amp; targets</span><span class="menu-item__chevron">›</span></button>`,
     ].join("");
     renderDrawerFooter();
     return;
@@ -1832,7 +2261,7 @@ function renderMenu() {
       renderTaskMenuItem(),
       ...(canManageUsers() && !state.previewUser ? [`<button class="menu-item" data-section="users"><span class="menu-item__icon">♙</span><span>Users</span><span class="menu-item__chevron">›</span></button>`] : []),
       ...(canViewExecutiveDashboard() ? [`<button class="menu-item menu-item--executive" data-section="executive"><span class="menu-item__icon">↗</span><span>Executive dashboard</span><span class="menu-item__chevron">›</span></button>`] : []),
-      ...(canViewProfitPlan() ? [`<button class="menu-item menu-item--profit-plan" data-section="profit-plan"><span class="menu-item__icon">↟</span><span>Profit Improvement Plan</span><span class="menu-item__chevron">›</span></button>`] : []),
+      ...(canViewProfitPlan() ? [`<button class="menu-item menu-item--profit-plan" data-section="profit-plan"><span class="menu-item__icon">↟</span><span>Budget &amp; targets</span><span class="menu-item__chevron">›</span></button>`] : []),
     ].join("");
     renderDrawerFooter();
     return;
@@ -1927,6 +2356,90 @@ function renderWeekPicker() {
   return `<div class="report-week-picker"><span>Report ending</span><button class="report-week-picker__button" type="button" data-action="toggle-calendar" aria-expanded="${state.calendarOpen ? "true" : "false"}" aria-haspopup="dialog"><strong>${formatDate(report.selectedWeek)}</strong><b aria-hidden="true">▦</b></button>${state.calendarOpen ? renderWeekCalendar(weeks) : ""}</div>`;
 }
 
+function financialYearDates(year) {
+  const startYear = Number(year.slice(0, 4));
+  return {
+    start: `${startYear}-05-01`,
+    end: `${startYear + 1}-04-30`,
+  };
+}
+
+function financialYearProgress(selectedWeek, year) {
+  const { start, end } = financialYearDates(year);
+  const day = 86_400_000;
+  const startTime = Date.parse(`${start}T12:00:00Z`);
+  const endTime = Date.parse(`${end}T12:00:00Z`);
+  const selectedTime = Date.parse(`${selectedWeek}T12:00:00Z`);
+  if (![startTime, endTime, selectedTime].every(Number.isFinite)) return null;
+  return Math.max(0, Math.min(1, (selectedTime - startTime + day) / (endTime - startTime + day)));
+}
+
+function financialYearPaceData() {
+  const selectedWeek = report?.selectedWeek;
+  if (!selectedWeek) return null;
+  const financialYear = profitPlanAccountingYear(selectedWeek);
+  const budget = profitPlanBudgetForYear(financialYear);
+  if (!budget?.annual) return null;
+  const values = [budget.annual.sales, budget.annual.grossProfit, budget.annual.labour];
+  if (!values.every(Number.isFinite)) return null;
+  const progress = financialYearProgress(selectedWeek, financialYear);
+  if (progress === null) return null;
+  const access = state.previewAccess || state.access;
+  const unrestricted = ["admin", "owner"].includes(access?.role) || access?.dateAccess?.scope === "all";
+  const permittedWeeks = new Set(state.availableWeeks || []);
+  const rows = executiveRows().filter((row) => (
+    profitPlanAccountingYear(row.week) === financialYear
+    && row.week <= selectedWeek
+    && (unrestricted || permittedWeeks.has(row.week))
+  ));
+  if (!rows.length) return { financialYear, progress, budget, rows, restricted: !unrestricted, measures: [] };
+  const actuals = {
+    sales: executiveMetric(rows, "salesEx", "sum"),
+    grossProfit: executiveMetric(rows, "overallGpPounds", "sum"),
+    labour: executiveMetric(rows, "totalWages", "sum"),
+  };
+  const measures = [
+    { id: "sales", label: "Sales ex VAT", actual: actuals.sales, annualBudget: budget.annual.sales, lowerIsBetter: false },
+    { id: "gross-profit", label: "Gross profit", actual: actuals.grossProfit, annualBudget: budget.annual.grossProfit, lowerIsBetter: false },
+    { id: "wages", label: "Wage spend", actual: actuals.labour, annualBudget: budget.annual.labour, lowerIsBetter: true },
+  ].filter((item) => Number.isFinite(item.actual));
+  return { financialYear, progress, budget, rows, restricted: !unrestricted, measures };
+}
+
+function financialYearPaceTone(measure, progress) {
+  const planned = measure.annualBudget * progress;
+  const gap = measure.lowerIsBetter ? planned - measure.actual : measure.actual - planned;
+  const tolerance = measure.annualBudget * .005;
+  return Math.abs(gap) <= tolerance ? "on-pace" : gap > 0 ? "ahead" : "behind";
+}
+
+function renderFinancialYearPaceMeasure(measure, progress) {
+  const planned = measure.annualBudget * progress;
+  const gap = measure.lowerIsBetter ? planned - measure.actual : measure.actual - planned;
+  const tone = financialYearPaceTone(measure, progress);
+  const actualProgress = Math.max(0, Math.min(1, measure.actual / measure.annualBudget));
+  const paceLabel = tone === "on-pace" ? "On planned pace" : tone === "ahead" ? measure.lowerIsBetter ? "Under planned wage pace" : "Ahead of planned pace" : measure.lowerIsBetter ? "Above planned wage pace" : "Behind planned pace";
+  const gapText = tone === "on-pace" ? "Matches the budget pace" : `${executiveFormat(Math.abs(gap), "currency")} ${tone === "ahead" ? "favourable" : "off pace"}`;
+  return `<article class="financial-year-pace__measure financial-year-pace__measure--${tone}">
+    <div class="financial-year-pace__measure-heading"><div><span>${escapeHtml(measure.label)}</span><strong>${executiveFormat(measure.actual, "currency")}</strong></div><div><span>Annual budget</span><b>${executiveFormat(measure.annualBudget, "currency")}</b></div></div>
+    <div class="financial-year-pace__track" role="progressbar" aria-label="${escapeHtml(measure.label)} against annual budget" aria-valuemin="0" aria-valuemax="${Math.round(measure.annualBudget)}" aria-valuenow="${Math.round(measure.actual)}"><i style="width:${(actualProgress * 100).toFixed(2)}%"></i><em style="left:${(progress * 100).toFixed(2)}%" aria-hidden="true"></em></div>
+    <div class="financial-year-pace__measure-note"><span>${paceLabel}</span><strong>${gapText}</strong><small>Planned to date: ${executiveFormat(planned, "currency")}</small></div>
+  </article>`;
+}
+
+function renderFinancialYearPace() {
+  const pace = financialYearPaceData();
+  if (!pace) return "";
+  const open = state.overviewPaceOpen;
+  const period = financialYearDates(pace.financialYear);
+  const measures = pace.measures.length ? `<div class="financial-year-pace__measures">${pace.measures.map((measure) => renderFinancialYearPaceMeasure(measure, pace.progress)).join("")}</div>` : `<p class="financial-year-pace__unavailable">There are no weekly figures available for this selected financial year yet.</p>`;
+  const restrictedNote = pace.restricted ? `<p class="financial-year-pace__access-note">This account does not have access to every week in the financial year, so this view uses only its permitted report weeks.</p>` : "";
+  return `<section class="financial-year-pace-wrap">
+    <button class="financial-year-pace-button" type="button" data-action="toggle-financial-year-pace" aria-expanded="${open ? "true" : "false"}"><span class="financial-year-pace-button__icon" aria-hidden="true">↗</span><span><strong>Financial year pace</strong><small>Sales, gross profit and wages against budget</small></span><b aria-hidden="true">${open ? "−" : "+"}</b></button>
+    ${open ? `<section class="financial-year-pace" aria-label="Financial year pace against budget"><div class="financial-year-pace__heading"><div><p class="eyebrow">${escapeHtml(pace.financialYear)} BUDGET PACE</p><h3>Are we running to plan?</h3><p>When the coloured progress bars line up with the gold time marker, the business is following the annual budget.</p></div><span>To ${escapeHtml(formatDate(report.selectedWeek, true))}</span></div><div class="financial-year-pace__time"><div><span>Financial year elapsed</span><strong>${Math.round(pace.progress * 100)}%</strong></div><div class="financial-year-pace__time-track"><i style="width:${(pace.progress * 100).toFixed(2)}%"></i></div><small>${escapeHtml(formatDate(period.start, true))} to ${escapeHtml(formatDate(period.end, true))}</small></div>${measures}${restrictedNote}<p class="financial-year-pace__key"><i aria-hidden="true"></i>Gold marker = how far through the financial year we are. Coloured fill = the proportion of that measure’s annual budget used or delivered.</p></section>` : ""}
+  </section>`;
+}
+
 function renderOverview() {
   const primary = report.overview.slice(0, 4);
   const performance = report.overview.slice(4);
@@ -1956,6 +2469,7 @@ function renderOverview() {
       <button class="text-button" type="button" data-action="open-menu">Browse sections <span>&rarr;</span></button>
     </section>
 
+    ${renderFinancialYearPace()}
     ${corePerformance}
     ${salesPerformance}
     ${detailLinks}`;
@@ -2056,7 +2570,7 @@ function render() {
   }
   topWeek.textContent = report ? formatDate(state.week || report.selectedWeek, true).replace(/&mdash;/g, "—") : "No report yet";
   renderMenu();
-  const page = state.section === "hub" ? renderHub() : state.section === "tasks" ? renderTasks() : state.section === "set-task" ? renderSetTask() : state.section === "users" ? renderUsers() : state.section === "activity" ? renderActivity() : state.section === "executive" ? renderExecutiveDashboard() : state.section === "profit-plan" ? renderProfitImprovementPlan() : state.section === "admin" ? (state.menuMode === "tasks" ? renderTaskAdmin() : renderAdmin()) : !report ? renderNoReport() : state.section === "overview" ? renderOverview() : state.section === "update-report" ? renderUpdateReport() : renderSection(getSection(state.section));
+  const page = state.section === "hub" ? renderHub() : state.section === "tasks" ? renderTasks() : state.section === "set-task" ? renderSetTask() : state.section === "users" ? renderUsers() : state.section === "activity" ? renderActivity() : state.section === "executive" ? renderExecutiveDashboard() : state.section === "profit-plan" ? renderProfitImprovementPlan() : state.section === "budget-month" ? renderBudgetSalesMonthPage() : state.section === "admin" ? (state.menuMode === "tasks" ? renderTaskAdmin() : renderAdmin()) : !report ? renderNoReport() : state.section === "overview" ? renderOverview() : state.section === "update-report" ? renderUpdateReport() : renderSection(getSection(state.section));
   app.innerHTML = `${renderPreviewBanner()}${page}`;
   attachDynamicListeners();
   if ((state.section === "admin" || state.section === "users" || state.section === "activity") && state.adminUsers === null) void loadAdminUsers();
@@ -2584,7 +3098,7 @@ async function signOut() {
   localPreviewModel = null;
   sharedReportVersion = "";
   lastActivityKey = "";
-  state = { section: "hub", week: "", sourceName: "", isUploaded: false, authMode: "login", authMessage: "You have signed out.", authToken: "", user: null, access: null, adminUsers: null, adminMessage: "", availableWeeks: [], taskData: null, taskMessage: "", menuMode: "report", executive: null, executivePeriod: "", executiveMetricModes: {}, executiveDetailMetric: "", executiveDetailOverlays: [], executiveDetailYearScope: "all", executiveScenarioOpen: false, executiveScenario: null, profitPlans: {}, profitPlanYear: "", profitPlanMessage: "", profitPlanReviewMonth: "" };
+  state = { section: "hub", week: "", sourceName: "", isUploaded: false, authMode: "login", authMessage: "You have signed out.", authToken: "", user: null, access: null, adminUsers: null, adminMessage: "", availableWeeks: [], taskData: null, taskMessage: "", menuMode: "report", executive: null, executivePeriod: "", executiveMetricModes: {}, executiveDetailMetric: "", executiveDetailYearScope: "all", executiveScenarioOpen: false, executiveScenario: null, profitPlans: {}, profitPlanYear: "", profitPlanMessage: "", profitPlanReviewMonth: "", profitPlanBudget: null, overviewPaceOpen: false, budgetSalesAssumptions: {}, budgetSalesExpandedMonth: "", budgetSalesDetailMonth: "", budgetSalesProjectionMonth: "", budgetSalesWeekProjectionMonth: "" };
   updateTaskBadge(0);
   render();
 }
@@ -2649,6 +3163,10 @@ function attachDynamicListeners() {
   }));
   document.querySelectorAll("[data-action='close-calendar']").forEach((button) => button.addEventListener("click", () => {
     state = { ...state, calendarOpen: false, calendarMonth: monthKey(report?.selectedWeek) };
+    render();
+  }));
+  document.querySelectorAll("[data-action='toggle-financial-year-pace']").forEach((button) => button.addEventListener("click", () => {
+    state = { ...state, overviewPaceOpen: !state.overviewPaceOpen };
     render();
   }));
   document.querySelectorAll("[data-action='calendar-month']").forEach((button) => button.addEventListener("click", () => {
@@ -2744,7 +3262,108 @@ function attachDynamicListeners() {
     render();
   }));
   document.querySelectorAll("[data-action='profit-plan-year']").forEach((select) => select.addEventListener("change", () => {
-    state = { ...state, profitPlanYear: select.value, profitPlanReviewMonth: "", profitPlanMessage: "" };
+    state = { ...state, profitPlanYear: select.value, profitPlanReviewMonth: "", profitPlanMessage: "", budgetSalesExpandedMonth: "", budgetSalesDetailMonth: "", budgetSalesProjectionMonth: "", budgetSalesWeekProjectionMonth: "" };
+    render();
+  }));
+  document.querySelectorAll("[data-action='choose-budget-upload']").forEach((button) => {
+    button.addEventListener("click", () => budgetInput?.click());
+    button.addEventListener("dragover", (event) => { event.preventDefault(); button.classList.add("is-dragging"); });
+    button.addEventListener("dragleave", () => button.classList.remove("is-dragging"));
+    button.addEventListener("drop", (event) => {
+      event.preventDefault();
+      button.classList.remove("is-dragging");
+      void handleBudgetUpload(event.dataTransfer.files);
+    });
+  });
+  document.querySelectorAll("[data-action='budget-sales-input']").forEach((input) => {
+    const saveSalesInput = () => {
+    const year = profitPlanSelectedYear();
+    const month = input.dataset.month;
+    const field = input.dataset.field;
+    const value = plainText(input.value);
+    if (!month || !["coversPerWeek", "spendPerHead"].includes(field)) return;
+    const number = profitPlanNumber(value);
+    if (value && (number === null || number < 0 || (field === "spendPerHead" && number === 0))) {
+      state = { ...state, profitPlanMessage: field === "spendPerHead" ? "Spend per head must be greater than zero." : "Covers per week cannot be negative." };
+      render();
+      return;
+    }
+    const yearAssumptions = { ...(state.budgetSalesAssumptions?.[year] || {}) };
+    const monthAssumptions = { ...(yearAssumptions[month] || {}) };
+    if (!value) delete monthAssumptions[field];
+    else monthAssumptions[field] = value;
+    yearAssumptions[month] = monthAssumptions;
+    state = {
+      ...state,
+      budgetSalesAssumptions: { ...(state.budgetSalesAssumptions || {}), [year]: yearAssumptions },
+      profitPlanMessage: "Sales plan updated locally.",
+    };
+    render();
+    };
+    // Keep the field stable while someone is typing. Saving on every keystroke
+    // re-renders the page and can interrupt a covers or SPH edit on mobile.
+    input.addEventListener("change", saveSalesInput);
+    input.addEventListener("blur", saveSalesInput);
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      saveSalesInput();
+    });
+  });
+  document.querySelectorAll("[data-action='open-budget-sales-month']").forEach((button) => button.addEventListener("click", () => {
+    const month = button.dataset.month || "";
+    if (!month) return;
+    state = { ...state, section: "budget-month", budgetSalesDetailMonth: month, budgetSalesExpandedMonth: "", budgetSalesProjectionMonth: "", budgetSalesWeekProjectionMonth: "" };
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }));
+  document.querySelectorAll("[data-action='toggle-budget-sales-projection']").forEach((button) => button.addEventListener("click", () => {
+    const month = button.dataset.month || "";
+    if (!month) return;
+    state = { ...state, budgetSalesProjectionMonth: state.budgetSalesProjectionMonth === month ? "" : month };
+    render();
+  }));
+  document.querySelectorAll("[data-action='toggle-budget-sales-week-projection']").forEach((button) => button.addEventListener("click", () => {
+    const month = button.dataset.month || "";
+    if (!month) return;
+    state = { ...state, budgetSalesWeekProjectionMonth: state.budgetSalesWeekProjectionMonth === month ? "" : month };
+    render();
+  }));
+  document.querySelectorAll("[data-action='return-budget-sales-plan']").forEach((button) => button.addEventListener("click", () => {
+    state = { ...state, section: "profit-plan", budgetSalesDetailMonth: "", budgetSalesProjectionMonth: "", budgetSalesWeekProjectionMonth: "" };
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }));
+  document.querySelectorAll("[data-action='toggle-budget-sales-guide']").forEach((button) => button.addEventListener("click", () => {
+    state = { ...state, budgetSalesGuideOpen: !state.budgetSalesGuideOpen };
+    render();
+  }));
+  document.querySelectorAll("[data-action='reset-budget-sales-plan']").forEach((button) => button.addEventListener("click", () => {
+    const year = profitPlanSelectedYear();
+    state = {
+      ...state,
+      budgetSalesAssumptions: { ...(state.budgetSalesAssumptions || {}), [year]: {} },
+      budgetSalesExpandedMonth: "",
+      budgetSalesDetailMonth: "",
+      budgetSalesProjectionMonth: "",
+      budgetSalesWeekProjectionMonth: "",
+      profitPlanMessage: "Sales plan reset to the budget and last-year inc-VAT SPH.",
+    };
+    render();
+  }));
+  document.querySelectorAll("[data-action='reset-budget-sales-month']").forEach((button) => button.addEventListener("click", () => {
+    const year = profitPlanSelectedYear();
+    const month = button.dataset.month || "";
+    if (!month) return;
+    const yearAssumptions = { ...(state.budgetSalesAssumptions?.[year] || {}) };
+    delete yearAssumptions[month];
+    state = {
+      ...state,
+      budgetSalesAssumptions: { ...(state.budgetSalesAssumptions || {}), [year]: yearAssumptions },
+      budgetSalesProjectionMonth: "",
+      budgetSalesWeekProjectionMonth: "",
+      profitPlanMessage: `${monthTitle(month)} targets returned to the adjusted budget.`,
+    };
     render();
   }));
   document.querySelectorAll("[data-profit-plan-form='summary']").forEach((form) => form.addEventListener("submit", (event) => {
@@ -2754,7 +3373,7 @@ function attachDynamicListeners() {
       plan.baselineOverride = values.get("baselineOverride")?.trim() || "";
       plan.targetProfit = values.get("targetProfit")?.trim() || "";
       plan.confirmedDelivered = values.get("confirmedDelivered")?.trim() || "";
-    }, "Annual plan saved locally.");
+    }, "Management targets saved locally.");
   }));
   document.querySelectorAll("[data-profit-opportunity-form]").forEach((form) => form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -3077,6 +3696,7 @@ async function handleUpload(files) {
       localPreviewModel = model;
       localPreviewSource = withOverviewTones(nextReport);
       report = localPreviewSource;
+      saveLocalPreviewMaster(model, file.name);
       state = { ...state, section: "overview", week: report.selectedWeek, sourceName: file.name, availableWeeks: model?.availableWeeks || [report.selectedWeek], executive: model?.executive || null, executivePeriod: model?.executive?.currentWeek?.slice(0, 4) || "", calendarOpen: false, calendarMonth: monthKey(report.selectedWeek), adminMessage: "Master workbook loaded for local preview only." };
       render();
       setUploadStatus("Master workbook loaded locally. It has not been published.", "is-success");
@@ -3092,6 +3712,179 @@ async function handleUpload(files) {
     setUploadStatus(error.message || "The master workbook could not be read.", "is-error");
   } finally {
     uploadInput.value = "";
+  }
+}
+
+function accountantBudgetNumber(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const source = plainText(value).replace(/,/g, "").replace(/[£$]/g, "");
+  if (!source) return null;
+  const parenthesised = /^\(.*\)$/.test(source);
+  const parsed = Number(source.replace(/[()]/g, "").replace(/[^0-9.+-]/g, ""));
+  return Number.isFinite(parsed) ? parenthesised ? -Math.abs(parsed) : parsed : null;
+}
+
+function accountantBudgetLabel(value) {
+  return plainText(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function accountantBudgetMonthKey(value) {
+  const date = dateFromExcel(value);
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date.slice(0, 7) : "";
+}
+
+function accountantBudgetMonthLabel(month) {
+  const [year, number] = month.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-GB", { month: "short", year: "numeric" }).format(new Date(year, number - 1, 1));
+}
+
+function accountantBudgetRows(sheet) {
+  if (!sheet?.["!ref"]) return [];
+  return window.XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null });
+}
+
+function accountantBudgetMonthColumns(rows) {
+  const candidates = rows.map((row, rowIndex) => ({
+    rowIndex,
+    columns: row.map((value, columnIndex) => ({ columnIndex, month: accountantBudgetMonthKey(value) })).filter((item) => item.month),
+  })).filter((item) => item.columns.length >= 10);
+  return candidates.sort((left, right) => right.columns.length - left.columns.length)[0] || null;
+}
+
+function accountantBudgetRow(rows, labels) {
+  const wanted = labels.map(accountantBudgetLabel);
+  return rows.find((row) => row.some((value) => wanted.includes(accountantBudgetLabel(value)))) || null;
+}
+
+function accountantBudgetValue(rows, labels, columnIndex) {
+  const row = accountantBudgetRow(rows, labels);
+  return row ? accountantBudgetNumber(row[columnIndex]) : null;
+}
+
+function accountantBudgetSheetScore(sheetName, sheet) {
+  const rows = accountantBudgetRows(sheet);
+  const headers = accountantBudgetMonthColumns(rows);
+  if (!headers) return -Infinity;
+  const labels = rows.flatMap((row) => row.map(accountantBudgetLabel));
+  const expected = ["total turnover", "gross profit", "total labour cost", "operating profit"];
+  const matched = expected.filter((label) => labels.includes(label)).length;
+  const name = accountantBudgetLabel(sheetName);
+  return (matched * 20) + headers.columns.length + (/budget/.test(name) ? 12 : 0) + (/orig/.test(name) ? 4 : 0) - (/actual|forecast/.test(name) ? 5 : 0);
+}
+
+function accountantBudgetPnl(sheetName, sheet, { requireBudget = false } = {}) {
+  const rows = accountantBudgetRows(sheet);
+  const header = accountantBudgetMonthColumns(rows);
+  if (!header) throw new Error(`I could not find 12 monthly columns in the ${sheetName} tab.`);
+  const monthColumns = header.columns.sort((left, right) => left.columnIndex - right.columnIndex);
+  const first = monthColumns[0];
+  const last = monthColumns.at(-1);
+  const totalColumn = last.columnIndex + 1;
+  const sales = accountantBudgetValue(rows, ["Total Turnover", "Total Sales"], totalColumn);
+  const grossProfit = accountantBudgetValue(rows, ["Gross Profit"], totalColumn);
+  const labour = accountantBudgetValue(rows, ["Total Labour Cost", "Total Labour"], totalColumn);
+  const operatingProfit = accountantBudgetValue(rows, ["Operating Profit"], totalColumn);
+  const missing = [["Total Turnover", sales], ["Gross Profit", grossProfit], ["Total Labour Cost", labour], ["Operating Profit", operatingProfit]].filter(([, value]) => !Number.isFinite(value)).map(([label]) => label);
+  if (missing.length) throw new Error(`${sheetName} is not a usable budget P&L. I could not read ${missing.join(", ")}.`);
+  const operatingCosts = accountantBudgetValue(rows, ["Total Administrative Costs", "Operating Costs"], totalColumn) ?? grossProfit - operatingProfit;
+  const overallGpPercent = accountantBudgetValue(rows, ["Overall GP", "Overall GP %"], totalColumn);
+  const labourPercent = accountantBudgetValue(rows, ["Labour %", "Total Labour %"], totalColumn);
+  const months = monthColumns.map(({ columnIndex, month }) => ({
+    month,
+    label: accountantBudgetMonthLabel(month),
+    sales: accountantBudgetValue(rows, ["Total Turnover", "Total Sales"], columnIndex),
+    grossProfit: accountantBudgetValue(rows, ["Gross Profit"], columnIndex),
+    labour: accountantBudgetValue(rows, ["Total Labour Cost", "Total Labour"], columnIndex),
+    operatingProfit: accountantBudgetValue(rows, ["Operating Profit"], columnIndex),
+  }));
+  if (requireBudget && months.some((month) => !Number.isFinite(month.sales) || !Number.isFinite(month.grossProfit) || !Number.isFinite(month.operatingProfit))) {
+    throw new Error(`${sheetName} needs monthly Total Turnover, Gross Profit and Operating Profit values for all 12 months.`);
+  }
+  const startYear = Number(first.month.slice(0, 4));
+  return {
+    financialYear: `${startYear}/${String(startYear + 1).slice(-2)}`,
+    periodLabel: `${accountantBudgetMonthLabel(first.month)} – ${accountantBudgetMonthLabel(last.month)}`,
+    months,
+    annual: {
+      sales,
+      grossProfit,
+      overallGpPercent: Number.isFinite(overallGpPercent) ? overallGpPercent : grossProfit / sales,
+      labour,
+      labourPercent: Number.isFinite(labourPercent) ? labourPercent : labour / sales,
+      operatingCosts,
+      operatingProfit,
+    },
+  };
+}
+
+function accountantBudgetFromWorkbook(workbook, sourceName) {
+  const candidates = workbook.SheetNames.map((sheetName) => ({ sheetName, sheet: workbook.Sheets[sheetName] }))
+    .map((item) => ({ ...item, score: accountantBudgetSheetScore(item.sheetName, item.sheet) }))
+    .filter((item) => Number.isFinite(item.score))
+    .sort((left, right) => right.score - left.score);
+  const budgetSheet = candidates[0];
+  if (!budgetSheet || budgetSheet.score < 85) throw new Error("I could not identify an accountant budget P&L. It needs monthly Total Turnover, Gross Profit, Total Labour Cost and Operating Profit lines.");
+  const budget = accountantBudgetPnl(budgetSheet.sheetName, budgetSheet.sheet, { requireBudget: true });
+  let priorActual = null;
+  const previousYear = `${Number(budget.financialYear.slice(0, 4)) - 1}/${budget.financialYear.slice(2, 4)}`;
+  for (const candidate of candidates) {
+    if (candidate.sheetName === budgetSheet.sheetName || !/actual/i.test(candidate.sheetName)) continue;
+    try {
+      const actual = accountantBudgetPnl(candidate.sheetName, candidate.sheet);
+      if (actual.financialYear !== previousYear) continue;
+      priorActual = actual.annual;
+      break;
+    } catch (error) {
+      console.warn("Previous-year actuals were not imported.", error);
+    }
+  }
+  return {
+    ...budget,
+    priorActual,
+    sourceLabel: `${sourceName} · ${budgetSheet.sheetName}`,
+  };
+}
+
+async function handleBudgetUpload(files) {
+  const file = files?.[0];
+  if (!file) return;
+  if (!localPreviewMode) {
+    state = { ...state, profitPlanMessage: "Budget upload is being tested in the local preview. The live version will use secure shared storage." };
+    render();
+    return;
+  }
+  if (!/\.(xlsx|xlsm|xls)$/i.test(file.name)) {
+    state = { ...state, profitPlanMessage: "Please choose an Excel .xlsx, .xlsm or .xls budget file." };
+    render();
+    return;
+  }
+  if (!window.XLSX) {
+    state = { ...state, profitPlanMessage: "The Excel reader is unavailable. Check your internet connection and reload the app." };
+    render();
+    return;
+  }
+  state = { ...state, profitPlanMessage: "Reading the accountant budget…" };
+  render();
+  try {
+    const workbook = window.XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+    const budget = accountantBudgetFromWorkbook(workbook, file.name);
+    state = {
+      ...state,
+      profitPlanBudget: budget,
+      profitPlanYear: budget.financialYear,
+      budgetSalesAssumptions: { ...(state.budgetSalesAssumptions || {}), [budget.financialYear]: {} },
+      budgetSalesExpandedMonth: "",
+      budgetSalesDetailMonth: "",
+      budgetSalesProjectionMonth: "",
+      budgetSalesWeekProjectionMonth: "",
+      profitPlanMessage: `${budget.financialYear} budget loaded locally. Review the sales plan and adjust monthly covers or spend per head if needed.`,
+    };
+  } catch (error) {
+    console.error(error);
+    state = { ...state, profitPlanMessage: error.message || "The accountant budget could not be read." };
+  } finally {
+    budgetInput.value = "";
+    render();
   }
 }
 
@@ -3409,7 +4202,11 @@ function executiveDataFromWorkbook(workbook, currentWeek) {
         const value = cellValue(sheet, row, column);
         return [key, typeof value === "number" && Number.isFinite(value) ? value : null];
       }));
-      if (salesAnchor && Number(values.salesEx) > 1000) salesWeeks.add(week);
+      // Some freshly updated Master Sheets have the inc-VAT total available
+      // before the ex-VAT formula column refreshes. Either genuine weekly
+      // sales total is enough to make the week available; blank future rows
+      // remain excluded.
+      if (salesAnchor && Math.max(Number(values.salesEx) || 0, Number(values.salesInc) || 0) > 1000) salesWeeks.add(week);
       if (!Object.values(values).some((value) => value !== null)) continue;
       rows[week] = { ...(rows[week] || {}), ...Object.fromEntries(Object.entries(values).filter(([, value]) => value !== null)) };
     }
@@ -3446,9 +4243,24 @@ function executiveDataFromWorkbook(workbook, currentWeek) {
   };
 }
 
+function latestSalesWeekFromWorkbook(workbook) {
+  const sheet = workbook.Sheets["All Sales"];
+  if (!sheet?.["!ref"]) return "";
+  const range = window.XLSX.utils.decode_range(sheet["!ref"]);
+  let latestWeek = "";
+  for (let row = range.s.r + 1; row <= range.e.r; row += 1) {
+    const week = dateFromExcel(cellValue(sheet, row, 8));
+    const salesInc = Number(cellValue(sheet, row, 42));
+    const salesEx = Number(cellValue(sheet, row, 43));
+    if (week && Math.max(Number.isFinite(salesInc) ? salesInc : 0, Number.isFinite(salesEx) ? salesEx : 0) > 1000 && week > latestWeek) latestWeek = week;
+  }
+  return latestWeek;
+}
+
 function masterReportModelFromWorkbook(workbook, reportSheet) {
-  const currentWeek = dateFromExcel(cellValue(reportSheet, 1, 13));
-  if (!currentWeek) throw new Error("I could not find the selected week-ending date in Generate Report.");
+  const selectedReportWeek = dateFromExcel(cellValue(reportSheet, 1, 13));
+  const currentWeek = latestSalesWeekFromWorkbook(workbook) || selectedReportWeek;
+  if (!currentWeek) throw new Error("I could not find a week-ending date in the Master Sheet.");
   const sections = masterSectionLayouts(reportSheet);
   if (!sections.length) throw new Error("I could not find the report configuration rows in this master workbook.");
   const sources = sourceDataForMaster(workbook, sections, currentWeek);
@@ -3585,6 +4397,7 @@ function sectionFromSheet(sheet, layout) {
 }
 
 uploadInput.addEventListener("change", (event) => handleUpload(event.target.files));
+budgetInput.addEventListener("change", (event) => { void handleBudgetUpload(event.target.files); });
 menuButton.addEventListener("click", openMenu);
 closeMenuButton.addEventListener("click", closeMenu);
 drawerBackdrop.addEventListener("click", closeMenu);
@@ -3647,13 +4460,28 @@ async function initialiseApplication() {
 
 async function loadLocalPermissionsPreview() {
   try {
-    const [response, executiveResponse] = await Promise.all([
-      fetch("./data/report-data.json", { cache: "no-store" }),
-      fetch("./data/executive-dashboard.json", { cache: "no-store" }),
-    ]);
-    if (!response.ok) throw new Error("The local sample report could not be loaded.");
-    localPreviewSource = withOverviewTones(await response.json());
-    const localExecutive = executiveResponse.ok ? await executiveResponse.json() : null;
+    const savedMaster = readSavedLocalPreviewMaster();
+    let localExecutive = null;
+    let localSourceName = "Local preview report";
+    let localAvailableWeeks = [];
+    if (savedMaster) {
+      localPreviewModel = savedMaster.model;
+      const restoredReport = reportForWeek(localPreviewModel, localPreviewModel.currentWeek);
+      if (!restoredReport) throw new Error("The saved local Master Sheet could not be restored.");
+      localPreviewSource = withOverviewTones(restoredReport);
+      localExecutive = localPreviewModel.executive || null;
+      localSourceName = plainText(savedMaster.sourceName) || "Saved local Master Sheet";
+      localAvailableWeeks = localPreviewModel.availableWeeks || [restoredReport.selectedWeek];
+    } else {
+      const [response, executiveResponse] = await Promise.all([
+        fetch("./data/report-data.json", { cache: "no-store" }),
+        fetch("./data/executive-dashboard.json", { cache: "no-store" }),
+      ]);
+      if (!response.ok) throw new Error("The local sample report could not be loaded.");
+      localPreviewSource = withOverviewTones(await response.json());
+      localExecutive = executiveResponse.ok ? await executiveResponse.json() : null;
+      localAvailableWeeks = [localPreviewSource.selectedWeek];
+    }
     report = localPreviewSource;
     const viewerView = defaultAccessView(["sales", "covers", "wages"]);
     viewerView.overview.cards = ["sales-inc", "covers", "wages"];
@@ -3673,8 +4501,8 @@ async function loadLocalPermissionsPreview() {
       ...state,
       section: "hub",
       week: report.selectedWeek,
-      sourceName: "Local preview report",
-      availableWeeks: [report.selectedWeek],
+      sourceName: localSourceName,
+      availableWeeks: localAvailableWeeks,
       authMode: "authenticated",
       user: { id: "preview-admin", email: "admin@example.com", name: "Admin preview" },
       access: { enabled: true, role: "admin", sections: report.sections.map((section) => section.id), dateAccess: { scope: "all" }, canManageUsers: true, canPublish: true },

@@ -80,6 +80,49 @@ main { width: min(100%, 920px); margin: 0 auto; padding: 24px 16px 42px; }
 .quick-link { display: grid; grid-template-columns: 25px 1fr 12px; align-items: center; gap: 7px; min-height: 52px; padding: 8px 11px; border: 1px solid var(--line); border-left: 4px solid var(--gold); border-radius: 10px; color: var(--ink); background: #fffdf8; font-size: .74rem; font-weight: 800; text-align: left; }
 .quick-link > :last-child { color: #887c5c; font-size: 1.2rem; }
 .quick-link__icon, .menu-item__icon { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; color: #fff; background: var(--ink); font-size: .78rem; font-weight: 900; }
+.financial-year-pace-wrap { display: grid; gap: 10px; margin-top: 16px; }
+.financial-year-pace-button { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; min-height: 62px; padding: 10px 13px; border: 1px solid #b57945; border-radius: 11px; color: #2e2419; background: linear-gradient(135deg, #fff9eb, #f8ead0); box-shadow: 0 5px 16px #5c42121a; font: inherit; text-align: left; }
+.financial-year-pace-button__icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; color: #fffaf0; background: #794432; font-size: 1.05rem; font-weight: 950; }
+.financial-year-pace-button strong { display: block; color: #3a2b1d; font-size: .82rem; font-weight: 950; }
+.financial-year-pace-button small { display: block; margin-top: 2px; color: #766653; font-size: .63rem; font-weight: 700; line-height: 1.25; }
+.financial-year-pace-button > b { color: #914a3c; font-size: 1.35rem; font-weight: 850; }
+.financial-year-pace { display: grid; gap: 14px; padding: 15px; border: 1px solid #c99b5b; border-radius: 12px; background: linear-gradient(135deg, #fffdf8, #fbf2df); box-shadow: 0 6px 18px #5c421214; }
+.financial-year-pace__heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.financial-year-pace__heading .eyebrow { margin: 0 0 3px; color: #a14b3d; }
+.financial-year-pace__heading h3 { margin: 0 0 5px; color: #2c251a; font-size: 1.15rem; letter-spacing: -.03em; }
+.financial-year-pace__heading p:last-child { max-width: 590px; margin: 0; color: #706452; font-size: .7rem; line-height: 1.4; }
+.financial-year-pace__heading > span { flex: 0 0 auto; padding: 6px 8px; border-radius: 999px; color: #75431f; background: #f2dbad; font-size: .58rem; font-weight: 900; line-height: 1.15; text-align: center; }
+.financial-year-pace__time { display: grid; gap: 7px; padding: 11px; border: 1px solid #e0c79b; border-radius: 9px; background: #fffaf0; }
+.financial-year-pace__time > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.financial-year-pace__time span { color: #725d3f; font-size: .64rem; font-weight: 900; letter-spacing: .055em; text-transform: uppercase; }
+.financial-year-pace__time strong { color: #3e2b1a; font-size: 1.1rem; letter-spacing: -.04em; }
+.financial-year-pace__time-track, .financial-year-pace__track { position: relative; overflow: hidden; height: 12px; border-radius: 999px; background: #e9ddc7; }
+.financial-year-pace__time-track i, .financial-year-pace__track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #bf842e, #d7ab52); }
+.financial-year-pace__time small { color: #7c6d59; font-size: .61rem; }
+.financial-year-pace__measures { display: grid; gap: 10px; }
+.financial-year-pace__measure { display: grid; gap: 8px; padding: 11px; border: 1px solid #ddd1bc; border-left: 4px solid #a18452; border-radius: 9px; background: #fffefa; }
+.financial-year-pace__measure--ahead { border-left-color: #3c8054; }
+.financial-year-pace__measure--behind { border-left-color: #b64c47; }
+.financial-year-pace__measure--on-pace { border-left-color: #bd862d; }
+.financial-year-pace__measure-heading { display: flex; align-items: end; justify-content: space-between; gap: 10px; }
+.financial-year-pace__measure-heading > div { display: grid; gap: 2px; min-width: 0; }
+.financial-year-pace__measure-heading span { color: #756954; font-size: .57rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; }
+.financial-year-pace__measure-heading strong { color: #292217; font-size: 1.12rem; letter-spacing: -.04em; line-height: 1; }
+.financial-year-pace__measure-heading b { color: #5d5040; font-size: .7rem; line-height: 1.1; }
+.financial-year-pace__track { overflow: visible; height: 13px; }
+.financial-year-pace__measure--ahead .financial-year-pace__track i { background: linear-gradient(90deg, #2e7047, #5dac72); }
+.financial-year-pace__measure--behind .financial-year-pace__track i { background: linear-gradient(90deg, #a94240, #d36d64); }
+.financial-year-pace__track em { position: absolute; z-index: 1; top: -4px; bottom: -4px; width: 3px; border-radius: 3px; background: #bd862d; box-shadow: 0 0 0 1px #fffdf8; transform: translateX(-1px); }
+.financial-year-pace__measure-note { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; align-items: baseline; }
+.financial-year-pace__measure-note span { color: #4e4537; font-size: .67rem; font-weight: 900; }
+.financial-year-pace__measure-note strong { color: #5c513f; font-size: .65rem; font-weight: 900; text-align: right; }
+.financial-year-pace__measure--ahead .financial-year-pace__measure-note strong { color: #207040; }
+.financial-year-pace__measure--behind .financial-year-pace__measure-note strong { color: #a5413d; }
+.financial-year-pace__measure-note small { grid-column: 1 / -1; color: #7e725e; font-size: .59rem; }
+.financial-year-pace__key, .financial-year-pace__access-note, .financial-year-pace__unavailable { margin: 0; color: #756856; font-size: .63rem; line-height: 1.4; }
+.financial-year-pace__key { padding-top: 9px; border-top: 1px solid #eadac0; }
+.financial-year-pace__key i { display: inline-block; width: 3px; height: 12px; margin: 0 5px -2px 2px; border-radius: 3px; background: #bd862d; }
+.financial-year-pace__access-note { padding: 9px; border-left: 3px solid #bd862d; border-radius: 6px; background: #fff4d7; }
 
 .section-hero { margin: -24px -16px 0; padding: 19px 16px 22px; color: #fff; background: var(--ink); }
 .section-hero .eyebrow { color: #f6d34b; }.section-hero h2 { color: #fff; }
@@ -342,8 +385,8 @@ main { width: min(100%, 1120px); }
 .profit-review__metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 12px; }
 
 @media (min-width: 700px) {
-  .profit-plan-summary { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-  .profit-plan-setup form { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; }
+  .profit-plan-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .profit-plan-setup form { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; }
   .profit-plan-setup form > button { grid-column: 1 / -1; justify-self: start; }
   .profit-opportunity-form { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .profit-quarter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -396,9 +439,202 @@ main { width: min(100%, 1120px); }
 .profit-budget__table-wrap tr:last-child td { border-bottom: 0; }
 .profit-budget-month--positive td:nth-child(4) { color: #1a6338; font-weight: 900; background: #eaf5ea; }
 .profit-budget-month--negative td:nth-child(4) { color: #a2423e; font-weight: 900; background: #fbeceb; }
+.profit-budget__missing-prior { margin: 0; padding: 10px; border: 1px dashed #cfb48b; border-radius: 8px; color: #765b3a; background: #fff8e8; font-size: .68rem; line-height: 1.4; }
+.profit-budget-upload { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, .56fr); gap: 12px 16px; align-items: center; padding: 15px 16px; border: 1px solid #d3a56e; border-radius: 12px; background: linear-gradient(135deg, #fffdf8, #f9ecdc); box-shadow: 0 5px 16px #5f421710; }
+.profit-budget-upload .eyebrow { margin: 0 0 3px; color: #a14b3d; }
+.profit-budget-upload h3 { margin: 0 0 5px; color: #2e251a; font-size: 1.05rem; letter-spacing: -.025em; }
+.profit-budget-upload > div > p:not(.eyebrow):not(.profit-budget-upload__source) { margin: 0; color: #6f6351; font-size: .7rem; line-height: 1.4; }
+.profit-budget-upload__drop { display: grid; justify-items: center; gap: 3px; min-height: 94px; padding: 12px; border: 1px dashed #a86143; border-radius: 9px; color: #733828; background: #fffaf3; font: inherit; cursor: pointer; transition: background .15s ease, border-color .15s ease, transform .15s ease; }
+.profit-budget-upload__drop:hover, .profit-budget-upload__drop.is-dragging { border-style: solid; border-color: #713325; background: #f8dcc9; transform: translateY(-1px); }
+.profit-budget-upload__drop > span { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; color: #fff8ed; background: #874232; font-size: 1.05rem; font-weight: 950; line-height: 1; }
+.profit-budget-upload__drop strong { font-size: .74rem; font-weight: 900; }
+.profit-budget-upload__drop small { color: #806b55; font-size: .62rem; }
+.profit-budget-upload__source { margin: 8px 0 0; color: #5c4934; font-size: .64rem; line-height: 1.35; overflow-wrap: anywhere; }
+.profit-budget-upload__source span { color: #806e59; }
+.profit-budget-upload__note { grid-column: 1 / -1; margin: 0; padding-top: 9px; border-top: 1px solid #e3c9a4; color: #7a6a56; font-size: .62rem; line-height: 1.35; }
+.budget-sales-plan { display: grid; gap: 14px; padding: 17px; border: 1px solid #b88750; border-radius: 13px; background: linear-gradient(135deg, #fffdf8, #f8eddb); box-shadow: 0 7px 20px #5f421713; }
+.budget-sales-plan--empty { color: #6f6250; }
+.budget-sales-plan__heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.budget-sales-plan__heading .eyebrow { margin: 0 0 3px; color: #a14b3d; }
+.budget-sales-plan__heading h3 { margin: 0 0 5px; color: #2d251a; font-size: clamp(1.2rem, 4vw, 1.45rem); letter-spacing: -.035em; }
+.budget-sales-plan__heading p:last-child { max-width: 620px; margin: 0; color: #706452; font-size: .7rem; line-height: 1.42; }
+.budget-sales-plan__actions { display: grid; gap: 6px; flex: 0 0 auto; }
+.budget-sales-plan__heading button { flex: 0 0 auto; min-height: 34px; padding: 7px 9px; border: 1px solid #a35442; border-radius: 7px; color: #7a382d; background: #fffaf3; font: inherit; font-size: .65rem; font-weight: 900; }
+.budget-sales-plan__heading button:hover { color: #fffaf3; background: #9b4739; }
+.budget-sales-plan__heading button:focus-visible { outline: 2px solid #9b4739; outline-offset: 3px; }
+.budget-sales-guide { display: grid; gap: 10px; padding: 12px; border: 1px solid #bd8744; border-radius: 9px; background: #fff8e9; }
+.budget-sales-guide header { display: flex; align-items: start; justify-content: space-between; gap: 10px; }
+.budget-sales-guide header > div { display: grid; gap: 2px; }
+.budget-sales-guide header span { color: #9a493a; font-size: .58rem; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }
+.budget-sales-guide header strong { color: #332719; font-size: .98rem; }
+.budget-sales-guide header button { display: grid; place-items: center; width: 30px; min-height: 30px; padding: 0; border: 1px solid #a35442; border-radius: 50%; color: #7a382d; background: #fffdf8; font: inherit; font-size: 1.1rem; line-height: 1; cursor: pointer; }
+.budget-sales-guide header button:hover { color: #fffdf8; background: #9b4739; }
+.budget-sales-guide header button:focus-visible { outline: 2px solid #9b4739; outline-offset: 3px; }
+.budget-sales-guide ol { display: grid; gap: 8px; margin: 0; padding-left: 20px; color: #5e503e; font-size: .67rem; line-height: 1.38; }
+.budget-sales-guide li { padding-left: 2px; }
+.budget-sales-guide li::marker { color: #a04b3d; font-weight: 900; }
+.budget-sales-guide li strong, .budget-sales-guide > p strong { color: #3e2e1d; }
+.budget-sales-guide > p { margin: 0; padding-top: 8px; border-top: 1px solid #ddc39a; color: #665845; font-size: .65rem; line-height: 1.35; }
+.budget-sales-plan__baseline { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.budget-sales-plan__baseline > div { display: grid; align-content: start; gap: 4px; min-width: 0; padding: 10px; border: 1px solid #e1d0b4; border-top: 3px solid #ba842f; border-radius: 8px; background: #fffdf9; }
+.budget-sales-plan__baseline > div:nth-child(2) { border-top-color: #3f8055; }
+.budget-sales-plan__baseline > div:nth-child(3) { border-top-color: #a04b3d; }
+.budget-sales-plan__baseline span { color: #766a58; font-size: .56rem; font-weight: 900; letter-spacing: .045em; line-height: 1.18; text-transform: uppercase; }
+.budget-sales-plan__baseline strong { color: #2f271d; font-size: clamp(.83rem, 3vw, 1.08rem); letter-spacing: -.035em; line-height: 1.05; }
+.budget-sales-plan__baseline small { color: #796d5a; font-size: .55rem; line-height: 1.24; }
+.budget-sales-plan__months { display: grid; gap: 9px; }
+.budget-sales-month { display: grid; gap: 9px; padding: 12px; border: 1px solid #decfb8; border-left: 4px solid #b07b37; border-radius: 10px; background: #fffefa; }
+.budget-sales-month--above-budget { border-color: #8ab798; border-left-color: #368053; background: #f3faf4; }
+.budget-sales-month--below-budget { border-color: #e0a19b; border-left-color: #b34c46; background: #fff5f3; }
+.budget-sales-month__toggle { display: grid; width: 100%; gap: 9px; padding: 0; border: 0; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.budget-sales-month__toggle:focus-visible { outline: 2px solid #a64d3e; outline-offset: 4px; border-radius: 4px; }
+.budget-sales-month__toggle:hover .budget-sales-month__heading strong { color: #9b4638; }
+.budget-sales-month__heading { display: flex; align-items: end; justify-content: space-between; gap: 10px; }
+.budget-sales-month__heading > div { display: grid; gap: 2px; min-width: 0; }
+.budget-sales-month__heading > div:last-child { text-align: right; }
+.budget-sales-month__heading span { color: #776b58; font-size: .68rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; }
+.budget-sales-month__heading strong { color: #2d251a; font-size: 1.55rem; letter-spacing: -.05em; line-height: 1; }
+.budget-sales-month--above-budget .budget-sales-month__heading strong { color: #1f6d3d; }
+.budget-sales-month--below-budget .budget-sales-month__heading strong { color: #a43e39; }
+.budget-sales-month__heading b { color: #5c4e3c; font-size: .78rem; line-height: 1.12; }
+.budget-sales-month__heading small { color: #786e5d; font-size: .62rem; }
+.budget-sales-month__week { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 8px; border-radius: 6px; background: #f5ecdc; }
+.budget-sales-month__week span { color: #756955; font-size: .61rem; font-weight: 800; }
+.budget-sales-month__week strong { color: #5e3827; font-size: .68rem; }
+.budget-sales-month__progress { display: grid; gap: 5px; padding: 8px; border: 1px solid #d6bc8c; border-radius: 6px; background: #fff8e9; }
+.budget-sales-month__progress > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.budget-sales-month__progress span { color: #665944; font-size: .59rem; font-weight: 900; letter-spacing: .035em; text-transform: uppercase; }
+.budget-sales-month__progress strong { color: #3a2c1c; font-size: .69rem; text-align: right; }
+.budget-sales-month__progress-track { height: 9px; overflow: hidden; border-radius: 999px; background: #e9dfce; }
+.budget-sales-month__progress-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #a14b3d, #c08839); }
+.budget-sales-month__progress small { color: #756955; font-size: .57rem; font-weight: 750; line-height: 1.25; }
+.budget-sales-month__metrics { display: grid; gap: 5px; }
+.budget-sales-month__metric { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; row-gap: 2px; padding: 7px 8px; border: 1px solid #e5d7c3; border-radius: 6px; background: #fffaf2; }
+.budget-sales-month__metric span { color: #756956; font-size: .57rem; font-weight: 900; letter-spacing: .035em; text-transform: uppercase; }
+.budget-sales-month__metric strong { color: #2d251a; font-size: .78rem; letter-spacing: -.025em; line-height: 1; text-align: right; }
+.budget-sales-month__metric small { grid-column: 1 / -1; color: #796e5d; font-size: .55rem; font-weight: 700; line-height: 1.2; }
+.budget-sales-month__metric--waiting strong { color: #897d6b; }
+.budget-sales-month__bars { display: grid; gap: 7px; }
+.budget-sales-month-bar { display: grid; gap: 4px; padding: 8px; border: 1px solid #e0cfb6; border-left: 3px solid #b78131; border-radius: 6px; background: #fffdf9; }
+.budget-sales-month-bar--above-budget { border-color: #80af90; border-left-color: #368053; background: #f0f8f1; }
+.budget-sales-month-bar--below-budget { border-color: #df9e98; border-left-color: #b34c46; background: #fff3f1; }
+.budget-sales-month-bar > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.budget-sales-month-bar span { color: #685c4c; font-size: .59rem; font-weight: 900; letter-spacing: .035em; text-transform: uppercase; }
+.budget-sales-month-bar strong { color: #292117; font-size: .88rem; letter-spacing: -.03em; }
+.budget-sales-month-bar--above-budget strong, .budget-sales-month-bar--above-budget p b, .budget-sales-month-bar--above-budget small { color: #1f6d3d; }
+.budget-sales-month-bar--below-budget strong, .budget-sales-month-bar--below-budget p b, .budget-sales-month-bar--below-budget small { color: #a43e39; }
+.budget-sales-month-bar p { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; color: #756a59; font-size: .57rem; }
+.budget-sales-month-bar p i { font-style: normal; }
+.budget-sales-month-bar__track { position: relative; height: 8px; overflow: hidden; border-radius: 999px; background: #eadfcd; }
+.budget-sales-month-bar__track i { display: block; height: 100%; border-radius: inherit; background: #b78131; }
+.budget-sales-month-bar--above-budget .budget-sales-month-bar__track i { background: #368053; }
+.budget-sales-month-bar--below-budget .budget-sales-month-bar__track i { background: #b34c46; }
+.budget-sales-month-bar__track em { position: absolute; top: -3px; width: 3px; height: 14px; border-radius: 4px; background: #312719; box-shadow: 0 0 0 1px #fffdf9; }
+.budget-sales-month-bar small { color: #786c5a; font-size: .57rem; font-weight: 850; }
+.budget-sales-month__open { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; padding-top: 1px; color: #8c4337; font-size: .6rem; font-weight: 900; }
+.budget-sales-month__open b { font-size: 1rem; line-height: .6; }
+.budget-sales-month__projection-button { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 9px; border: 1px solid #a14b3d; border-radius: 6px; color: #813d32; background: #fffaf3; font: inherit; font-size: .64rem; font-weight: 900; text-align: left; cursor: pointer; }
+.budget-sales-month__projection-button:hover { color: #fffaf2; background: #a14b3d; }
+.budget-sales-month__projection-button:focus-visible { outline: 2px solid #a14b3d; outline-offset: 3px; }
+.budget-sales-month__projection-button b { font-size: 1rem; line-height: .8; }
+.budget-sales-projection { display: grid; gap: 8px; padding: 10px; border: 1px solid #c7a26e; border-radius: 7px; background: #fff6e5; }
+.budget-sales-projection header { display: grid; gap: 4px; }
+.budget-sales-projection header > div { display: grid; gap: 1px; }
+.budget-sales-projection header span { color: #8b4435; font-size: .59rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; }
+.budget-sales-projection header strong { color: #332719; font-size: .84rem; }
+.budget-sales-projection header small { color: #756955; font-size: .59rem; line-height: 1.3; }
+.budget-sales-projection__bars { display: grid; gap: 7px; }
+.budget-sales-month__basis { margin: -2px 0 0; color: #786c59; font-size: .57rem; font-weight: 750; line-height: 1.25; }
+.budget-sales-month__inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.budget-sales-month__inputs label { display: grid; gap: 4px; min-width: 0; color: #655a49; font-size: .56rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; }
+.budget-sales-month__inputs input { width: 100%; box-sizing: border-box; min-height: 37px; padding: 7px 8px; border: 1px solid #cbb89a; border-radius: 6px; color: #2d251a; background: #fffdf8; font: inherit; font-size: .78rem; font-weight: 800; letter-spacing: normal; }
+.budget-sales-month__input-help { margin: -4px 0 0; color: #756955; font-size: .58rem; font-weight: 750; line-height: 1.25; }
+.budget-sales-month__reset-button { display: grid; justify-items: start; gap: 2px; width: 100%; padding: 8px 9px; border: 1px solid #9b4739; border-radius: 6px; color: #843d31; background: #fff9f2; font: inherit; font-size: .66rem; font-weight: 900; text-align: left; cursor: pointer; }
+.budget-sales-month__reset-button:hover { color: #fffaf2; background: #9b4739; }
+.budget-sales-month__reset-button:focus-visible { outline: 2px solid #9b4739; outline-offset: 3px; }
+.budget-sales-month__reset-button small { font-size: .56rem; font-weight: 750; line-height: 1.25; }
+.budget-sales-month__variance { margin: 0; font-size: .62rem; font-weight: 850; line-height: 1.25; }
+.budget-sales-month__variance--on-budget { color: #7a6133; }
+.budget-sales-month__variance--above-budget { color: #247041; }
+.budget-sales-month__variance--below-budget { color: #aa4841; }
+.budget-sales-summary { display: grid; gap: 10px; padding: 12px; border: 1px solid #d8c39e; border-radius: 9px; background: #fffaf1; }
+.budget-sales-summary__heading { display: grid; gap: 4px; }
+.budget-sales-summary__heading .eyebrow { margin: 0; color: #a14b3d; font-size: .6rem; }
+.budget-sales-summary__heading h3 { margin: 0; color: #2e251b; font-size: 1.05rem; letter-spacing: -.03em; }
+.budget-sales-summary__heading > p { margin: 0; color: #756957; font-size: .66rem; line-height: 1.35; }
+.budget-sales-summary__bars { display: grid; gap: 8px; }
+.budget-sales-summary__bar { display: grid; gap: 5px; padding: 9px; border: 1px solid #e0cfb6; border-left: 4px solid #b78131; border-radius: 7px; background: #fffdf9; }
+.budget-sales-summary__bar--ahead { border-color: #79ae88; border-left-color: #368053; background: #f0f8f1; }
+.budget-sales-summary__bar--behind { border-color: #dc9e98; border-left-color: #b34c46; background: #fff3f1; }
+.budget-sales-summary__bar--on-plan { border-left-color: #b78131; }
+.budget-sales-summary__bar > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.budget-sales-summary__bar span { color: #685c4c; font-size: .67rem; font-weight: 900; }
+.budget-sales-summary__bar strong { color: #292117; font-size: 1.02rem; letter-spacing: -.03em; }
+.budget-sales-summary__bar--ahead strong, .budget-sales-summary__bar--ahead p b { color: #1f6d3d; }
+.budget-sales-summary__bar--behind strong, .budget-sales-summary__bar--behind p b { color: #a43e39; }
+.budget-sales-summary__bar p { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; color: #756a59; font-size: .63rem; }
+.budget-sales-summary__bar p i { font-style: normal; }
+.budget-sales-summary__bar p b { color: #554633; font-weight: 900; }
+.budget-sales-summary__track { position: relative; height: 12px; overflow: hidden; border-radius: 999px; background: #eadfcd; }
+.budget-sales-summary__track i { display: block; height: 100%; border-radius: inherit; background: #b78131; }
+.budget-sales-summary__bar--ahead .budget-sales-summary__track i { background: #368053; }
+.budget-sales-summary__bar--behind .budget-sales-summary__track i { background: #b34c46; }
+.budget-sales-summary__track em { position: absolute; top: -3px; width: 3px; height: 18px; border-radius: 4px; background: #312719; box-shadow: 0 0 0 1px #fffdf9; }
+.budget-sales-summary__bar small { color: #786c5a; font-size: .64rem; font-weight: 850; }
+.budget-sales-summary__bar--ahead small { color: #287144; }
+.budget-sales-summary__bar--behind small { color: #a5403b; }
+.budget-sales-summary__key { display: flex; align-items: center; gap: 6px; margin: 0; color: #756a59; font-size: .6rem; }
+.budget-sales-summary__key i { display: inline-block; width: 3px; height: 14px; border-radius: 4px; background: #312719; }
+.budget-sales-weeks { display: grid; gap: 10px; padding: 13px; border: 1px solid #d8c39e; border-radius: 9px; background: #f8efdf; }
+.budget-sales-weeks__heading { display: grid; gap: 2px; }
+.budget-sales-weeks__heading strong { color: #3d3020; font-size: .86rem; }
+.budget-sales-weeks__heading span { color: #746957; font-size: .7rem; line-height: 1.35; }
+.budget-sales-weeks__projection-button { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 9px; border: 1px solid #a14b3d; border-radius: 6px; color: #813d32; background: #fffaf3; font: inherit; font-size: .66rem; font-weight: 900; text-align: left; cursor: pointer; }
+.budget-sales-weeks__projection-button:hover { color: #fffaf2; background: #a14b3d; }
+.budget-sales-weeks__projection-button:focus-visible { outline: 2px solid #a14b3d; outline-offset: 3px; }
+.budget-sales-weeks__projection-button b { font-size: 1rem; line-height: .8; }
+.budget-sales-weeks__projection-note { margin: -3px 0 0; color: #756955; font-size: .62rem; font-weight: 750; line-height: 1.3; }
+.budget-sales-weeks__list { display: grid; gap: 8px; }
+.budget-sales-week { padding: 12px; border: 1px solid #decfb8; border-radius: 7px; background: #fffdf8; }
+.budget-sales-week--actual { border-left: 3px solid #3e8056; }
+.budget-sales-week--projected { border-left: 3px solid #a06c2f; background: #fff9ed; }
+.budget-sales-week--future { border-left: 3px solid #b47c33; }
+.budget-sales-week--missing { border-left: 3px solid #b34c46; }
+.budget-sales-week header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.budget-sales-week header span { color: #504330; font-size: .82rem; font-weight: 900; }
+.budget-sales-week header b { color: #796b58; font-size: .66rem; letter-spacing: .04em; text-transform: uppercase; }
+.budget-sales-week dl { display: grid; gap: 9px; margin: 10px 0 0; }
+.budget-sales-week__metric { display: grid; gap: 5px; }
+.budget-sales-week__metric > div:first-child { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; align-items: baseline; }
+.budget-sales-week dt { color: #746856; font-size: .68rem; font-weight: 850; }
+.budget-sales-week dd { display: grid; justify-items: end; margin: 0; color: #2e261c; font-size: .8rem; font-weight: 900; }
+.budget-sales-week dd small { color: #7a6d5a; font-size: .62rem; font-weight: 700; }
+.budget-sales-week__metric--above-budget dd { color: #1f6d3d; }
+.budget-sales-week__metric--below-budget dd { color: #a43e39; }
+.budget-sales-week__track { position: relative; height: 8px; overflow: hidden; border-radius: 999px; background: #eadfcd; }
+.budget-sales-week__track i { display: block; height: 100%; border-radius: inherit; background: #b78131; }
+.budget-sales-week__metric--above-budget .budget-sales-week__track i { background: #368053; }
+.budget-sales-week__metric--below-budget .budget-sales-week__track i { background: #b34c46; }
+.budget-sales-week__track em { position: absolute; top: -3px; width: 3px; height: 14px; border-radius: 4px; background: #312719; box-shadow: 0 0 0 1px #fffdf9; }
+.budget-sales-detail-page { display: grid; gap: 14px; }
+.budget-sales-detail-page .page-intro { margin: 0; }
+.budget-sales-month-detail { display: grid; gap: 11px; padding: 16px; border: 1px solid #b88750; border-left: 5px solid #a14b3d; border-radius: 12px; background: linear-gradient(135deg, #fffdf8, #f8eddb); box-shadow: 0 7px 20px #5f421713; }
+.budget-sales-plan__total { display: flex; align-items: end; justify-content: space-between; gap: 12px; padding: 13px; border: 1px solid #cda366; border-left: 5px solid #b78131; border-radius: 9px; background: #fbf1dc; }
+.budget-sales-plan__total > div { display: grid; gap: 3px; }
+.budget-sales-plan__total > div:last-child { text-align: right; }
+.budget-sales-plan__total span { color: #745d3e; font-size: .59rem; font-weight: 900; letter-spacing: .045em; text-transform: uppercase; }
+.budget-sales-plan__total strong { color: #2e251b; font-size: clamp(1.1rem, 4.5vw, 1.48rem); letter-spacing: -.045em; line-height: 1; }
+.budget-sales-plan__total small { color: #746854; font-size: .61rem; font-weight: 800; }
+.budget-sales-plan__total--above-budget { border-left-color: #3d8055; }
+.budget-sales-plan__total--above-budget small { color: #207040; }
+.budget-sales-plan__total--below-budget { border-left-color: #b74b44; }
+.budget-sales-plan__total--below-budget small { color: #a6413d; }
+.budget-sales-plan__reforecast { margin: -4px 0 0; padding: 9px 10px; border-left: 3px solid #ba842f; border-radius: 5px; color: #5d4930; background: #f6ead5; font-size: .62rem; font-weight: 800; line-height: 1.35; }
+.budget-sales-plan__note { margin: 0; color: #756a59; font-size: .63rem; line-height: 1.4; }
 
 @media (min-width: 700px) {
   .profit-budget__cards { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .budget-sales-plan__months { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (max-width: 480px) {
@@ -406,4 +642,12 @@ main { width: min(100%, 1120px); }
   .profit-budget__journey { grid-template-columns: 1fr; }
   .profit-budget__journey i { display: none; }
   .profit-budget__drivers { grid-template-columns: 1fr; }
+  .profit-budget-upload { grid-template-columns: 1fr; }
+  .profit-budget-upload__drop { min-height: 82px; }
+  .budget-sales-plan { padding: 15px; }
+  .budget-sales-plan__heading { display: grid; }
+  .budget-sales-plan__heading button { justify-self: start; }
+  .budget-sales-plan__baseline { grid-template-columns: 1fr; }
+  .budget-sales-plan__total { align-items: start; flex-direction: column; }
+  .budget-sales-plan__total > div:last-child { text-align: left; }
 }

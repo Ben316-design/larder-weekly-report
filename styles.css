@@ -362,3 +362,48 @@ main { width: min(100%, 1120px); }
   .profit-opportunity-form__wide, .profit-opportunity-form > button { grid-column: auto; }
   .profit-plan-bridge__figures { grid-template-columns: 1fr auto 1fr; }
 }
+
+/* Budget-first view: translates the accountant P&L into a management plan. */
+.profit-budget { display: grid; gap: 14px; padding: 17px; border: 1px solid #b88a49; border-radius: 13px; background: linear-gradient(135deg, #fffdf7, #fbf1df); box-shadow: 0 7px 20px #5f421715; }
+.profit-budget__heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.profit-budget__heading .eyebrow { color: #9a493c; }
+.profit-budget__heading h3 { margin: 4px 0 5px; color: #2d251b; font-size: clamp(1.2rem, 4vw, 1.45rem); letter-spacing: -.035em; }
+.profit-budget__heading p:last-child { margin: 0; color: #756a58; font-size: .7rem; line-height: 1.35; }
+.profit-budget__heading > span { flex: 0 0 auto; padding: 6px 8px; border-radius: 999px; color: #75421f; background: #f7dfad; font-size: .58rem; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }
+.profit-budget__journey { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: stretch; gap: 7px; }
+.profit-budget__journey > div { display: grid; align-content: start; gap: 5px; min-width: 0; padding: 10px; border: 1px solid #e4d2b3; border-top: 4px solid #a34d3d; border-radius: 9px; background: #fffdf8; }
+.profit-budget__journey > div:nth-of-type(2) { border-top-color: #bf862b; }
+.profit-budget__journey > div:nth-of-type(3) { border-top-color: #3c7b50; }
+.profit-budget__journey span { color: #746857; font-size: .58rem; font-weight: 900; line-height: 1.17; }
+.profit-budget__journey strong { color: #292116; font-size: clamp(1rem, 3.5vw, 1.35rem); letter-spacing: -.045em; line-height: 1; }
+.profit-budget__journey small { color: #7e7360; font-size: .56rem; line-height: 1.22; }
+.profit-budget__journey i { align-self: center; color: #a34d3d; font-size: 1.25rem; font-style: normal; font-weight: 900; }
+.profit-budget__cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.profit-budget__cards .profit-plan-summary-card { min-height: 97px; background: #fffdf9; }
+.profit-budget__drivers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.profit-budget__drivers article { display: grid; gap: 4px; padding: 10px; border: 1px solid #eadbc4; border-radius: 8px; background: #f7f0e4; }
+.profit-budget__drivers span { color: #766a58; font-size: .57rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; }
+.profit-budget__drivers strong { color: #326b47; font-size: .95rem; letter-spacing: -.035em; }
+.profit-budget__drivers small { color: #746a5a; font-size: .57rem; line-height: 1.25; }
+.profit-budget__months { padding: 11px; border: 1px solid #d8c7aa; border-radius: 8px; background: #fffdf9; }
+.profit-budget__months summary { cursor: pointer; color: #71382d; font-size: .72rem; font-weight: 900; }
+.profit-budget__months p { margin: 8px 0 10px; color: #766b5b; font-size: .65rem; line-height: 1.35; }
+.profit-budget__table-wrap { overflow-x: auto; border: 1px solid #e5d8c3; border-radius: 7px; -webkit-overflow-scrolling: touch; }
+.profit-budget__table-wrap table { width: 100%; min-width: 585px; border-collapse: collapse; font-size: .68rem; }
+.profit-budget__table-wrap th, .profit-budget__table-wrap td { padding: 8px 9px; border-right: 1px solid #eee4d3; border-bottom: 1px solid #eee4d3; text-align: right; white-space: nowrap; }
+.profit-budget__table-wrap th:first-child, .profit-budget__table-wrap td:first-child { text-align: left; }
+.profit-budget__table-wrap th { color: #594d3b; background: #f4e5c9; font-size: .56rem; font-weight: 900; letter-spacing: .045em; text-transform: uppercase; }
+.profit-budget__table-wrap tr:last-child td { border-bottom: 0; }
+.profit-budget-month--positive td:nth-child(4) { color: #1a6338; font-weight: 900; background: #eaf5ea; }
+.profit-budget-month--negative td:nth-child(4) { color: #a2423e; font-weight: 900; background: #fbeceb; }
+
+@media (min-width: 700px) {
+  .profit-budget__cards { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 480px) {
+  .profit-budget { padding: 15px; }
+  .profit-budget__journey { grid-template-columns: 1fr; }
+  .profit-budget__journey i { display: none; }
+  .profit-budget__drivers { grid-template-columns: 1fr; }
+}

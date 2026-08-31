@@ -1245,11 +1245,49 @@ const profitPlanKpis = [
   { id: "labour-percent", label: "Labour %", shortLabel: "Labour %", kind: "percentage", lowerIsBetter: true, basis: "Total wages ÷ sales ex. VAT", value: (rows) => profitPlanRatio(rows, "totalWages", "salesEx") },
 ];
 
+const localAccountantBudget = localPreviewMode ? {
+  financialYear: "2026/27",
+  periodLabel: "May 2026 – April 2027",
+  sourceLabel: "Accountant budget · original 2026/27 plan",
+  priorActual: {
+    sales: 901838.27,
+    grossProfit: 608257.11,
+    overallGpPercent: .6744636264,
+    labour: 421969.45,
+    labourPercent: .4678992498,
+    operatingCosts: 643060.22,
+    operatingProfit: -34803.11,
+  },
+  annual: {
+    sales: 958247.37,
+    grossProfit: 679397.38,
+    overallGpPercent: .709,
+    labour: 424624.74,
+    labourPercent: .4431264314,
+    operatingCosts: 631020.91,
+    operatingProfit: 48376.48,
+  },
+  months: [
+    { month: "2026-05", label: "May", sales: 77958.03, grossProfit: 55272.25, labour: 35195.80, operatingProfit: 6693.69 },
+    { month: "2026-06", label: "Jun", sales: 67378.75, grossProfit: 47771.53, labour: 34137.88, operatingProfit: -9114.26 },
+    { month: "2026-07", label: "Jul", sales: 73391.29, grossProfit: 52034.42, labour: 34739.13, operatingProfit: 3051.76 },
+    { month: "2026-08", label: "Aug", sales: 93810.49, grossProfit: 66511.64, labour: 36781.05, operatingProfit: 3088.63 },
+    { month: "2026-09", label: "Sep", sales: 77824.74, grossProfit: 55177.74, labour: 35182.47, operatingProfit: 5693.75 },
+    { month: "2026-10", label: "Oct", sales: 78354.31, grossProfit: 55553.21, labour: 35235.43, operatingProfit: 5565.31 },
+    { month: "2026-11", label: "Nov", sales: 81893.32, grossProfit: 58062.36, labour: 35589.33, operatingProfit: -652.46 },
+    { month: "2026-12", label: "Dec", sales: 107013.06, grossProfit: 75872.26, labour: 38101.31, operatingProfit: 23466.90 },
+    { month: "2027-01", label: "Jan", sales: 62319.33, grossProfit: 44184.40, labour: 33631.93, operatingProfit: -3671.13 },
+    { month: "2027-02", label: "Feb", sales: 83654.05, grossProfit: 59310.72, labour: 35765.40, operatingProfit: 10152.31 },
+    { month: "2027-03", label: "Mar", sales: 80856.70, grossProfit: 57327.40, labour: 35485.67, operatingProfit: -62.90 },
+    { month: "2027-04", label: "Apr", sales: 73793.31, grossProfit: 52319.45, labour: 34779.33, operatingProfit: 4164.87 },
+  ],
+} : null;
+
 const profitPlanQuarterLabels = {
-  Q1: "Q1 · Apr–Jun",
-  Q2: "Q2 · Jul–Sep",
-  Q3: "Q3 · Oct–Dec",
-  Q4: "Q4 · Jan–Mar",
+  Q1: "Q1 · May–Jul",
+  Q2: "Q2 · Aug–Oct",
+  Q3: "Q3 · Nov–Jan",
+  Q4: "Q4 · Feb–Apr",
 };
 
 function profitPlanNumber(value) {
@@ -1262,15 +1300,30 @@ function profitPlanRatio(rows, numeratorKey, denominatorKey, denominatorScale = 
   return executiveRatioMetric(rows, { numeratorKey, denominatorKey, denominatorScale });
 }
 
+function profitPlanAccountingYear(week) {
+  const year = Number(String(week).slice(0, 4));
+  const month = Number(String(week).slice(5, 7));
+  const startYear = month >= 5 ? year : year - 1;
+  return `${startYear}/${String(startYear + 1).slice(-2)}`;
+}
+
+function profitPlanYears() {
+  return [...new Set(executiveRows().map((row) => profitPlanAccountingYear(row.week)))].sort();
+}
+
+function profitPlanBudgetForYear(year) {
+  return localAccountantBudget?.financialYear === year ? localAccountantBudget : null;
+}
+
 function profitPlanFinancialYearRows(year) {
-  return executiveRows().filter((row) => executiveFinancialYear(row.week) === year);
+  return executiveRows().filter((row) => profitPlanAccountingYear(row.week) === year);
 }
 
 function profitPlanQuarterForWeek(week) {
   const month = Number(String(week).slice(5, 7));
-  if (month >= 4 && month <= 6) return "Q1";
-  if (month >= 7 && month <= 9) return "Q2";
-  if (month >= 10 && month <= 12) return "Q3";
+  if (month >= 5 && month <= 7) return "Q1";
+  if (month >= 8 && month <= 10) return "Q2";
+  if (month === 11 || month === 12 || month === 1) return "Q3";
   return "Q4";
 }
 
@@ -1319,7 +1372,7 @@ function profitPlanKpiOptions(selected = "") {
 }
 
 function profitPlanDefault(year) {
-  const years = executiveFinancialYears();
+  const years = profitPlanYears();
   const index = years.indexOf(year);
   const previousYear = index > 0 ? years[index - 1] : "";
   return {
@@ -1357,7 +1410,7 @@ function saveProfitPlan(plan, message = "") {
 }
 
 function profitPlanSelectedYear() {
-  const years = executiveFinancialYears();
+  const years = profitPlanYears();
   return years.includes(state.profitPlanYear) ? state.profitPlanYear : years.at(-1) || "";
 }
 
@@ -1384,6 +1437,42 @@ function profitPlanPeopleOptions(selected = "") {
 
 function renderProfitPlanSummaryCard(label, value, note = "", tone = "neutral") {
   return `<article class="profit-plan-summary-card profit-plan-summary-card--${tone}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong>${note ? `<small>${escapeHtml(note)}</small>` : ""}</article>`;
+}
+
+function profitPlanSignedCurrency(value) {
+  if (!Number.isFinite(value)) return "—";
+  return `${value > 0 ? "+" : ""}${executiveFormat(value, "currency")}`;
+}
+
+function renderProfitPlanBudget(year) {
+  const budget = profitPlanBudgetForYear(year);
+  if (!budget) return `<section class="profit-plan-panel profit-budget-empty"><div class="profit-plan-panel__heading"><div><p class="eyebrow">YOUR BUDGET</p><h3>Set the financial starting point</h3><p>When the accountant budget is connected, this page will show the annual target, the monthly sales plan and the gap to close.</p></div></div></section>`;
+  const salesGrowth = budget.annual.sales - budget.priorActual.sales;
+  const grossProfitGrowth = budget.annual.grossProfit - budget.priorActual.grossProfit;
+  const operatingCostSaving = budget.priorActual.operatingCosts - budget.annual.operatingCosts;
+  const operatingProfitImprovement = budget.annual.operatingProfit - budget.priorActual.operatingProfit;
+  return `<section class="profit-budget" aria-label="2026/27 accountant budget">
+    <div class="profit-budget__heading"><div><p class="eyebrow">YOUR FINANCIAL PLAN</p><h3>${escapeHtml(budget.financialYear)} budget in one view</h3><p>${escapeHtml(budget.periodLabel)} · ${escapeHtml(budget.sourceLabel)}</p></div><span>May–April</span></div>
+    <div class="profit-budget__journey"><div><span>Last year’s actual</span><strong>${executiveFormat(budget.priorActual.operatingProfit, "currency")}</strong><small>Operating loss</small></div><i>→</i><div><span>Improvement needed</span><strong>${executiveFormat(operatingProfitImprovement, "currency")}</strong><small>To reach the budget</small></div><i>→</i><div><span>This year’s target</span><strong>${executiveFormat(budget.annual.operatingProfit, "currency")}</strong><small>Operating profit</small></div></div>
+    <div class="profit-budget__cards">
+      ${renderProfitPlanSummaryCard("Sales budget", executiveFormat(budget.annual.sales, "currency"), `${profitPlanSignedCurrency(salesGrowth)} vs last year`, "positive")}
+      ${renderProfitPlanSummaryCard("Gross profit", executiveFormat(budget.annual.grossProfit, "currency"), `${executiveFormat(budget.annual.overallGpPercent, "percentage")} target`, "positive")}
+      ${renderProfitPlanSummaryCard("Labour budget", executiveFormat(budget.annual.labour, "currency"), `${executiveFormat(budget.annual.labourPercent, "percentage")} of sales`, "caution")}
+      ${renderProfitPlanSummaryCard("Operating-profit target", executiveFormat(budget.annual.operatingProfit, "currency"), "After labour and operating costs", "positive")}
+    </div>
+    <div class="profit-budget__drivers"><article><span>Sales growth</span><strong>${profitPlanSignedCurrency(salesGrowth)}</strong><small>Budgeted turnover above last year</small></article><article><span>Gross-profit gain</span><strong>${profitPlanSignedCurrency(grossProfitGrowth)}</strong><small>Sales and margin combined</small></article><article><span>Operating-cost reduction</span><strong>${profitPlanSignedCurrency(operatingCostSaving)}</strong><small>Including labour in the accountant model</small></article></div>
+    <details class="profit-budget__months"><summary>View the monthly budget</summary><p>Actual sales come from the weekly Master Sheet. Only completed months receive a variance; the latest month is clearly shown as a work-in-progress checkpoint.</p><div class="profit-budget__table-wrap"><table><thead><tr><th>Month</th><th>Sales budget</th><th>Actual sales</th><th>Variance</th><th>Operating-profit budget</th></tr></thead><tbody>${budget.months.map((month) => {
+      const monthlyRows = profitPlanFinancialYearRows(year).filter((row) => row.week.startsWith(month.month));
+      const actualSales = executiveMetric(monthlyRows, "salesEx", "sum");
+      const latestLoadedMonth = profitPlanFinancialYearRows(year).at(-1)?.week?.slice(0, 7) || "";
+      const monthInProgress = month.month === latestLoadedMonth;
+      const completed = month.month < latestLoadedMonth;
+      const variance = completed && Number.isFinite(actualSales) ? actualSales - month.sales : null;
+      const tone = variance === null ? "neutral" : variance >= 0 ? "positive" : "negative";
+      const actualText = Number.isFinite(actualSales) ? `${executiveFormat(actualSales, "currency")}${monthInProgress ? " to date" : ""}` : "Not loaded";
+      return `<tr class="profit-budget-month--${tone}"><td>${escapeHtml(month.label)}</td><td>${executiveFormat(month.sales, "currency")}</td><td>${actualText}</td><td>${monthInProgress ? "In progress" : variance === null ? "—" : profitPlanSignedCurrency(variance)}</td><td>${executiveFormat(month.operatingProfit, "currency")}</td></tr>`;
+    }).join("")}</tbody></table></div></details>
+  </section>`;
 }
 
 function renderProfitPlanOpportunity(opportunity) {
@@ -1448,17 +1537,19 @@ function renderProfitPlanReview(plan, year) {
 }
 
 function renderProfitImprovementPlan() {
-  const years = executiveFinancialYears();
+  const years = profitPlanYears();
   if (!years.length) return `<section class="profit-plan-page"><button class="back-link" type="button" data-section="hub">&larr; Information Hub</button><div class="page-intro"><p class="eyebrow">PROFIT IMPROVEMENT PLAN</p><h2>Build a better year</h2><p>Upload the full Master Performance Sheet to start a financial-year profit plan.</p></div></section>`;
   const year = profitPlanSelectedYear();
   const plan = profitPlanForYear(year);
+  const budget = profitPlanBudgetForYear(year);
   const yearRows = profitPlanFinancialYearRows(year);
   const previousRows = plan.previousYear ? profitPlanFinancialYearRows(plan.previousYear) : [];
   const contributionProxy = profitPlanContribution(previousRows);
-  const approvedBaseline = profitPlanNumber(plan.baselineOverride);
-  const baseline = approvedBaseline === null ? contributionProxy : approvedBaseline;
-  const target = profitPlanNumber(plan.targetProfit);
-  const required = target !== null && approvedBaseline !== null ? target - approvedBaseline : null;
+  const manualBaseline = profitPlanNumber(plan.baselineOverride);
+  const manualTarget = profitPlanNumber(plan.targetProfit);
+  const baseline = manualBaseline ?? budget?.priorActual.operatingProfit ?? contributionProxy;
+  const target = manualTarget ?? budget?.annual.operatingProfit ?? null;
+  const required = target !== null && baseline !== null ? target - baseline : null;
   const identified = plan.opportunities.filter((item) => !["cancelled"].includes(item.status)).reduce((total, item) => total + (profitPlanNumber(item.expectedBenefit) || 0), 0);
   const delivered = profitPlanNumber(plan.confirmedDelivered);
   const progress = required && required > 0 && delivered !== null ? Math.max(0, Math.min(1, delivered / required)) : null;
@@ -1468,19 +1559,20 @@ function renderProfitImprovementPlan() {
   const coverageTone = required !== null && required > 0 ? identified >= required ? "positive" : "caution" : "neutral";
   return `<section class="profit-plan-page">
     <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
-    <div class="profit-plan-hero"><p class="eyebrow">PROFIT IMPROVEMENT PLAN</p><h2>Build a better financial year</h2><p>Turn the weekly performance data into a focused plan: where we are, what will change, and whether the improvement is being delivered.</p></div>
-    <section class="profit-plan-controls"><label>Financial year<select data-action="profit-plan-year">${years.map((item) => `<option value="${item}" ${item === year ? "selected" : ""}>Financial year ${item}</option>`).join("")}</select></label><p><strong>${escapeHtml(year)} plan</strong><span>${yearRows.length} reporting weeks loaded from the Master Performance Sheet</span></p></section>
-    <p class="profit-plan-local-note"><strong>Local prototype:</strong> plans, opportunities and review notes are saved only in this browser until you approve the live version. “Operating contribution” is GP after wages, not audited operating profit.</p>
+    <div class="profit-plan-hero"><p class="eyebrow">PROFIT IMPROVEMENT PLAN</p><h2>Your budget. Your plan. Your result.</h2><p>Start with the accountant’s annual target, use weekly results to see whether it is on track, then focus the team on the changes that close the gap.</p></div>
+    <section class="profit-plan-controls"><label>Plan year<select data-action="profit-plan-year">${years.map((item) => `<option value="${item}" ${item === year ? "selected" : ""}>${item} · May–April</option>`).join("")}</select></label><p><strong>${escapeHtml(year)} plan</strong><span>${yearRows.length} reporting weeks loaded from the Master Performance Sheet</span></p></section>
+    <p class="profit-plan-local-note"><strong>Local prototype:</strong> this accountant budget is visible only in the local preview. Plans, opportunities and review notes are not yet published.</p>
     ${state.profitPlanMessage ? `<p class="profit-plan-message">${escapeHtml(state.profitPlanMessage)}</p>` : ""}
+    ${renderProfitPlanBudget(year)}
     <section class="profit-plan-summary" aria-label="Annual profit plan summary">
-      ${renderProfitPlanSummaryCard("Baseline contribution", baseline === null ? "Set baseline" : executiveFormat(baseline, "currency"), approvedBaseline === null ? plan.previousYear ? `GP after wages proxy · FY ${plan.previousYear}` : "No prior-year proxy available" : "Approved management-account baseline")}
-      ${renderProfitPlanSummaryCard("Target annual profit", target === null ? "Set target" : executiveFormat(target, "currency"), "Enter an approved management-account target")}
-      ${renderProfitPlanSummaryCard("Required improvement", required === null ? "Set approved baseline + target" : executiveFormat(required, "currency"), required !== null && required < 0 ? "Target is below baseline" : "Target less approved baseline", required !== null && required <= 0 ? "positive" : "neutral")}
+      ${renderProfitPlanSummaryCard("Starting operating result", baseline === null ? "Set baseline" : executiveFormat(baseline, "currency"), manualBaseline !== null ? "Approved management-account baseline" : budget ? "2025/26 actual operating profit" : plan.previousYear ? `GP after wages proxy · FY ${plan.previousYear}` : "No prior-year baseline available")}
+      ${renderProfitPlanSummaryCard("Operating-profit target", target === null ? "Set target" : executiveFormat(target, "currency"), manualTarget !== null ? "Approved management target" : budget ? "Accountant budget target" : "Enter an approved management target")}
+      ${renderProfitPlanSummaryCard("Improvement to deliver", required === null ? "Set plan inputs" : executiveFormat(required, "currency"), required !== null && required < 0 ? "Target is below the starting result" : "Target less starting result", required !== null && required <= 0 ? "positive" : "neutral")}
       ${renderProfitPlanSummaryCard("Identified opportunities", executiveFormat(identified, "currency"), required !== null && required > 0 ? `${Math.round((identified / required) * 100)}% of required improvement covered` : "Standalone estimates; may overlap", coverageTone)}
       ${renderProfitPlanSummaryCard("Confirmed improvement delivered", delivered === null ? "Set after P&L review" : executiveFormat(delivered, "currency"), progress === null ? "Use confirmed management-account result" : `${Math.round(progress * 100)}% of annual target`, progress === null ? "neutral" : progress >= 1 ? "positive" : "caution")}
     </section>
-    <section class="profit-plan-panel profit-plan-setup"><div class="profit-plan-panel__heading"><div><p class="eyebrow">ANNUAL PROFIT PLAN</p><h3>Set the financial objective</h3></div></div><form data-profit-plan-form="summary"><label>Approved operating-profit baseline (£)<input name="baselineOverride" type="number" inputmode="decimal" step="1" value="${escapeHtml(plan.baselineOverride)}" placeholder="Enter from management accounts"></label><label>Target annual operating profit (£)<input name="targetProfit" type="number" inputmode="decimal" step="1" value="${escapeHtml(plan.targetProfit)}" placeholder="e.g. 160000"></label><label>Confirmed improvement delivered (£)<input name="confirmedDelivered" type="number" inputmode="decimal" step="1" value="${escapeHtml(plan.confirmedDelivered)}" placeholder="Enter after P&L review"></label><button type="submit">Save annual plan</button></form><p>Use management accounts for these three figures. Until the approved baseline is entered, the prior-year GP-after-wages figure is shown only as an operating-contribution proxy.</p></section>
-    <section class="profit-plan-bridge"><div><p class="eyebrow">ANNUAL PROFIT BRIDGE</p><h3>Plan coverage</h3><p>Opportunity estimates are useful for prioritisation, but the live forecast will combine KPI drivers once assumptions are agreed—so we do not add overlapping revenue and GP gains twice.</p></div><div class="profit-plan-bridge__figures"><span>Approved baseline<strong>${approvedBaseline === null ? "Set baseline" : executiveFormat(approvedBaseline, "currency")}</strong></span><i>+</i><span>Identified opportunities<strong>${executiveFormat(identified, "currency")}</strong></span><i>=</i><span>Target<strong>${target === null ? "Set target" : executiveFormat(target, "currency")}</strong></span></div></section>
+    <section class="profit-plan-panel profit-plan-setup"><div class="profit-plan-panel__heading"><div><p class="eyebrow">YOUR ANNUAL TARGET</p><h3>Confirm or revise the plan</h3></div></div><form data-profit-plan-form="summary"><label>Starting operating result (£)<input name="baselineOverride" type="number" inputmode="decimal" step="1" value="${escapeHtml(plan.baselineOverride)}" placeholder="Uses 2025/26 actual if blank"></label><label>Operating-profit target (£)<input name="targetProfit" type="number" inputmode="decimal" step="1" value="${escapeHtml(plan.targetProfit)}" placeholder="Uses accountant budget if blank"></label><label>Confirmed improvement delivered (£)<input name="confirmedDelivered" type="number" inputmode="decimal" step="1" value="${escapeHtml(plan.confirmedDelivered)}" placeholder="Enter after P&L review"></label><button type="submit">Save annual target</button></form><p>The local budget is the default. Only enter a figure here if management agrees a revised starting point or target.</p></section>
+    <section class="profit-plan-bridge"><div><p class="eyebrow">YOUR IMPROVEMENT PLAN</p><h3>Do the planned actions close the gap?</h3><p>Each opportunity is a standalone estimate. Later, the forecast will combine volume, spend, GP and cost drivers in the right order so we do not count the same benefit twice.</p></div><div class="profit-plan-bridge__figures"><span>Starting result<strong>${baseline === null ? "Set baseline" : executiveFormat(baseline, "currency")}</strong></span><i>+</i><span>Planned actions<strong>${executiveFormat(identified, "currency")}</strong></span><i>=</i><span>Target<strong>${target === null ? "Set target" : executiveFormat(target, "currency")}</strong></span></div></section>
     <section class="profit-plan-opportunities"><div class="profit-plan-panel__heading"><div><p class="eyebrow">PROFIT OPPORTUNITIES</p><h3>Where will the improvement come from?</h3><p>Add a quantified opportunity, then use the quarterly focus to turn it into actions.</p></div></div><form class="profit-opportunity-form" data-profit-opportunity-form><label>Area<select name="category">${profitPlanKpis.map((kpi) => `<option value="${kpi.label}">${escapeHtml(kpi.label)}</option>`).join("")}<option value="Waste">Waste</option><option value="Purchasing">Purchasing</option><option value="Menu pricing">Menu pricing</option><option value="Other">Other</option></select></label><label>Opportunity title<input required name="title" maxlength="120" placeholder="e.g. Raise wine attachment"></label><label>Current baseline<input name="baseline" maxlength="80" placeholder="e.g. £9.80 SPH"></label><label>Target<input name="target" maxlength="80" placeholder="e.g. £10.75 SPH"></label><label>Estimated annual £ benefit<input required name="expectedBenefit" type="number" inputmode="decimal" min="0" step="1" placeholder="0"></label><label>Priority<select name="priority"><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select></label><label>Owner<select name="owner">${profitPlanPeopleOptions()}</select></label><label>Target completion<input name="dueDate" type="date"></label><label class="profit-opportunity-form__wide">Description<textarea name="description" rows="2" placeholder="Why this matters and how the benefit is expected to be achieved."></textarea></label><label class="profit-opportunity-form__wide">Actions required<textarea name="actions" rows="2" placeholder="The practical changes required to deliver it."></textarea></label><button type="submit">Add opportunity</button></form><p class="profit-plan-data-note">Estimated opportunity benefits are deliberately shown as standalone estimates. The combined plan will avoid double-counting volume, spend and GP changes.</p><div class="profit-opportunity-grid">${rankedOpportunities.length ? rankedOpportunities.map(renderProfitPlanOpportunity).join("") : '<p class="profit-plan-empty">No opportunities yet. Start with the clearest commercial or cost opportunity for the year.</p>'}</div></section>
     <section class="profit-plan-quarterly"><div class="profit-plan-panel__heading"><div><p class="eyebrow">QUARTERLY KPI FOCUS</p><h3>One primary KPI at a time</h3><p>${profitPlanQuarterLabels[activeQuarter]} is the current focus period. Improved levels become the expected operating standard rather than resetting at quarter end.</p></div></div><div class="profit-quarter-grid">${Object.keys(profitPlanQuarterLabels).map((quarter) => renderProfitPlanQuarter(plan, year, quarter)).join("")}</div></section>
     <div class="profit-plan-detail-grid">${renderProfitPlanReview(plan, year)}${renderProfitPlanWeeklyTracking(plan, year)}</div>

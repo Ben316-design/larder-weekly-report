@@ -521,6 +521,17 @@ function executiveYears() {
   return [...new Set(executiveRows().map((row) => row.week.slice(0, 4)))].sort();
 }
 
+function executiveFinancialYear(week) {
+  const year = Number(week.slice(0, 4));
+  const month = Number(week.slice(5, 7));
+  const startYear = month >= 4 ? year : year - 1;
+  return `${startYear}/${String(startYear + 1).slice(-2)}`;
+}
+
+function executiveFinancialYears() {
+  return [...new Set(executiveRows().map((row) => executiveFinancialYear(row.week)))].sort();
+}
+
 function defaultExecutivePeriod() {
   return executiveYears().at(-1) || "all";
 }
@@ -535,6 +546,7 @@ function executivePeriodGrain() {
 function executivePeriodOptions(grain = executivePeriodGrain()) {
   const weeks = executiveRows().map((row) => row.week);
   if (grain === "year") return executiveYears().map((year) => ({ value: year, label: `Calendar year ${year}` }));
+  if (grain === "financial-year") return executiveFinancialYears().map((year) => ({ value: year, label: `Financial year ${year}` }));
   if (grain === "quarter") {
     return [...new Set(weeks.map((week) => {
       const [year, month] = week.split("-").map(Number);
@@ -570,6 +582,7 @@ function executivePeriodWeeks() {
   if (grain === "latest-13") return allWeeks.slice(-13);
   if (grain === "all") return allWeeks;
   if (grain === "month") return allWeeks.filter((week) => week.startsWith(`${period}-`));
+  if (grain === "financial-year") return allWeeks.filter((week) => executiveFinancialYear(week) === period);
   if (grain === "quarter") return allWeeks.filter((week) => {
     const [year, quarter] = period.split("-Q");
     const month = Number(week.slice(5, 7));
@@ -587,6 +600,10 @@ function executivePeriodTitle() {
   if (grain === "quarter") {
     const [year, quarter] = period.split("-Q");
     return `Q${quarter} ${year}`;
+  }
+  if (grain === "financial-year") {
+    if (period === executiveFinancialYears().at(-1)) return `${period} financial year to date`;
+    return `Financial year ${period}`;
   }
   if (period === executiveYears().at(-1)) return `${period} reporting year to date`;
   return `Calendar year ${period}`;
@@ -1178,7 +1195,7 @@ function renderExecutiveDashboard() {
   return `<section class="executive-page">
     <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
     <div class="executive-hero"><p class="eyebrow">LARDER EXECUTIVE DASHBOARD</p><h2>Business trajectory</h2><p>See how volume, value, margin and labour have moved together—and which indicators are shaping the next few months.</p><img class="executive-hero__logo" src="./assets/larder-logo.png" alt="Larder Brasserie and Grill" /></div>
-    <section class="executive-controls" aria-label="Executive dashboard period"><label>View by<select data-action="executive-grain"><option value="month" ${grain === "month" ? "selected" : ""}>Month</option><option value="quarter" ${grain === "quarter" ? "selected" : ""}>Quarter</option><option value="year" ${grain === "year" ? "selected" : ""}>Calendar year</option><option value="latest-13" ${grain === "latest-13" ? "selected" : ""}>Latest 13 weeks</option><option value="all" ${grain === "all" ? "selected" : ""}>All available data</option></select></label>${periodOptions.length ? `<label>Period<select data-action="executive-period">${periodOptions.map((option) => `<option value="${escapeHtml(option.value)}" ${selectedPeriod === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select></label>` : ""}<button class="executive-scenario-button" type="button" data-action="open-executive-scenario"><span aria-hidden="true">∑</span> Scenario planner</button><p><strong>${escapeHtml(executivePeriodTitle())}</strong><span>${rows.length} reporting weeks · ${comparisonNote}</span></p></section>
+    <section class="executive-controls" aria-label="Executive dashboard period"><label>View by<select data-action="executive-grain"><option value="month" ${grain === "month" ? "selected" : ""}>Month</option><option value="quarter" ${grain === "quarter" ? "selected" : ""}>Quarter</option><option value="year" ${grain === "year" ? "selected" : ""}>Calendar year</option><option value="financial-year" ${grain === "financial-year" ? "selected" : ""}>Financial year (Apr–Mar)</option><option value="latest-13" ${grain === "latest-13" ? "selected" : ""}>Latest 13 weeks</option><option value="all" ${grain === "all" ? "selected" : ""}>All available data</option></select></label>${periodOptions.length ? `<label>Period<select data-action="executive-period">${periodOptions.map((option) => `<option value="${escapeHtml(option.value)}" ${selectedPeriod === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select></label>` : ""}<button class="executive-scenario-button" type="button" data-action="open-executive-scenario"><span aria-hidden="true">∑</span> Scenario planner</button><p><strong>${escapeHtml(executivePeriodTitle())}</strong><span>${rows.length} reporting weeks · ${comparisonNote}</span></p></section>
     <section class="executive-kpis" aria-label="Executive key performance indicators">
       ${renderExecutiveKpi({ id: "sales-ex", label: "Sales ex VAT", key: "salesEx", kind: "currency", aggregate: "sum", basis: "Total for selected period", valueToggle: true, valueToggleLabel: "£ change", rows, comparisonRows })}
       ${renderExecutiveKpi({ id: "total-covers", label: "Total covers", key: "covers", kind: "number", aggregate: "sum", basis: "Total covers in selected period", rows, comparisonRows })}

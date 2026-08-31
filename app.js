@@ -1917,7 +1917,14 @@ function renderBudgetSalesGuide() {
 
 function renderBudgetSalesPlan(year) {
   const plan = budgetSalesPlan(year);
-  if (!plan) return `<section class="budget-sales-plan budget-sales-plan--empty"><div><p class="eyebrow">TOTAL SALES</p><h3>Sales budget needs last year’s cover data</h3><p>Upload a Master Performance Sheet with the previous financial year’s sales and covers to calculate the starting weekly covers target.</p></div></section>`;
+  if (!plan) {
+    const budget = profitPlanBudgetForYear(year);
+    const previousYear = priorFinancialYear(year);
+    const message = !budget
+      ? "Upload the annual budget above first. Once it is saved, this area will turn it into monthly sales, covers and spend-per-head targets using the Master Performance Sheet already uploaded to the app."
+      : `The current Master Performance Sheet does not yet contain usable sales and covers for ${previousYear}. This page already uses the shared Master Sheet; upload a newer Master only if that earlier-year data is genuinely missing.`;
+    return `<section class="budget-sales-plan budget-sales-plan--empty"><div><p class="eyebrow">TOTAL SALES</p><h3>${budget ? "Previous-year cover data is unavailable" : "Connect the annual budget"}</h3><p>${escapeHtml(message)}</p></div></section>`;
+  }
   const previousYear = priorFinancialYear(year);
   const totalTone = budgetSalesVarianceTone(plan.variance);
   const totalVariance = totalTone === "on-budget" ? "Matches budget" : `${plan.variance > 0 ? "Up" : "Down"} ${executiveFormat(Math.abs(plan.variance), "currency")} vs budget`;
@@ -3841,6 +3848,49 @@ function accountantBudgetMonthColumns(rows) {
   return candidates.sort((left, right) => right.columns.length - left.columns.length)[0] || null;
 }
 
+const accountantBudgetMonthNames = ["may", "june", "july", "august", "september", "october", "november", "december", "january", "february", "march", "april"];
+
+function accountantBudgetStartYear(sheetName, rows) {
+  const sources = [sheetName, ...rows.slice(0, 30).flat()].map((value) => plainText(value));
+  for (const source of sources) {
+    const match = /\b(20\d{2}|\d{2})\s*[-/]\s*(20\d{2}|\d{2})\b/.exec(source);
+    if (!match) continue;
+    const start = Number(match[1].length === 2 ? `20${match[1]}` : match[1]);
+    const end = Number(match[2].length === 2 ? `20${match[2]}` : match[2]);
+    if (Number.isFinite(start) && end === start + 1) return start;
+  }
+  return null;
+}
+
+function accountantBudgetNamedMonthColumns(rows, sheetName) {
+  const startYear = accountantBudgetStartYear(sheetName, rows);
+  if (!Number.isFinite(startYear)) return null;
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex] || [];
+    const labels = row.map(accountantBudgetLabel);
+    for (let startColumn = 0; startColumn <= labels.length - accountantBudgetMonthNames.length; startColumn += 1) {
+      const matchesSequence = accountantBudgetMonthNames.every((name, offset) => labels[startColumn + offset] === name);
+      if (!matchesSequence) continue;
+      return {
+        rowIndex,
+        columns: accountantBudgetMonthNames.map((name, offset) => {
+          const monthNumber = offset < 8 ? offset + 5 : offset - 7;
+          const year = offset < 8 ? startYear : startYear + 1;
+          return { columnIndex: startColumn + offset, month: `${year}-${String(monthNumber).padStart(2, "0")}` };
+        }),
+      };
+    }
+  }
+  return null;
+}
+
+function accountantBudgetHeader(rows, sheetName) {
+  // Accountant workbooks commonly show a clear May–April name row above the
+  // P&L, while date cells elsewhere can sit in historic comparison panels.
+  // Prefer that named month sequence and fall back to date headings.
+  return accountantBudgetNamedMonthColumns(rows, sheetName) || accountantBudgetMonthColumns(rows);
+}
+
 function accountantBudgetRow(rows, labels, labelColumnIndex = null) {
   const wanted = labels.map(accountantBudgetLabel);
   if (Number.isInteger(labelColumnIndex) && labelColumnIndex >= 0) {
@@ -3855,8 +3905,8 @@ function accountantBudgetValue(rows, labels, columnIndex, labelColumnIndex = nul
   return row ? accountantBudgetNumber(row[columnIndex]) : null;
 }
 
-function accountantBudgetFinancialYear(sheet) {
-  const header = accountantBudgetMonthColumns(accountantBudgetRows(sheet));
+function accountantBudgetFinancialYear(sheet, sheetName = "") {
+  const header = accountantBudgetHeader(accountantBudgetRows(sheet), sheetName);
   const firstMonth = header?.columns
     .map((item) => item.month)
     .sort()
@@ -3868,20 +3918,20 @@ function accountantBudgetFinancialYear(sheet) {
 
 function accountantBudgetSheetScore(sheetName, sheet, preferredFinancialYear = "") {
   const rows = accountantBudgetRows(sheet);
-  const headers = accountantBudgetMonthColumns(rows);
+  const headers = accountantBudgetHeader(rows, sheetName);
   if (!headers) return -Infinity;
   const labels = rows.flatMap((row) => row.map(accountantBudgetLabel));
   const expected = ["total turnover", "gross profit", "total labour cost", "operating profit"];
   const matched = expected.filter((label) => labels.includes(label)).length;
   const name = accountantBudgetLabel(sheetName);
-  const financialYear = accountantBudgetFinancialYear(sheet);
+  const financialYear = accountantBudgetFinancialYear(sheet, sheetName);
   const preferred = financialYear && financialYear === preferredFinancialYear ? 1_000 : 0;
   return preferred + (matched * 20) + headers.columns.length + (/budget/.test(name) ? 12 : 0) + (/orig/.test(name) ? 4 : 0) - (/actual|forecast/.test(name) ? 5 : 0);
 }
 
 function accountantBudgetPnl(sheetName, sheet, { requireBudget = false } = {}) {
   const rows = accountantBudgetRows(sheet);
-  const header = accountantBudgetMonthColumns(rows);
+  const header = accountantBudgetHeader(rows, sheetName);
   if (!header) throw new Error(`I could not find 12 monthly columns in the ${sheetName} tab.`);
   const monthColumns = header.columns.sort((left, right) => left.columnIndex - right.columnIndex);
   const first = monthColumns[0];

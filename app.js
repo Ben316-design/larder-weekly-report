@@ -676,6 +676,31 @@ function executiveRowsForWeeks(weeks) {
   return weeks.map((week) => ({ week, ...entries[week] })).filter((row) => Object.prototype.hasOwnProperty.call(entries, row.week));
 }
 
+const executiveMonthlyFlowKeys = [
+  "salesEx", "salesInc", "covers", "foodSalesInc", "drinkSalesInc",
+  "overallGpPounds", "adjustedFoodGpPounds", "adjustedDrinkGpPounds",
+  "totalWages", "seniorManagementWages", "comps", "expenses", "futureBookings",
+];
+
+function executiveMonthlyRows(month, { through = "" } = {}) {
+  return executiveRows().map((row) => {
+    const { days, share } = budgetWeekMonthAllocation(row.week, month, through);
+    if (!days) return null;
+    const allocated = { ...row, calendarDaysInMonth: days, calendarDayShare: share };
+    executiveMonthlyFlowKeys.forEach((key) => {
+      const value = executiveValue(row, key);
+      if (Number.isFinite(value)) allocated[key] = value * share;
+    });
+    return allocated;
+  }).filter(Boolean);
+}
+
+function executiveRowsForSelectedPeriod() {
+  return executivePeriodGrain() === "month"
+    ? executiveMonthlyRows(executiveSelectedPeriod())
+    : executiveRowsForWeeks(executivePeriodWeeks());
+}
+
 function executiveComparableRows(weeks) {
   const entries = state.executive?.rows || {};
   const sameWeeksLastYear = weeks.map((week) => {
@@ -684,6 +709,20 @@ function executiveComparableRows(weeks) {
     return date.toISOString().slice(0, 10);
   });
   return executiveRowsForWeeks(sameWeeksLastYear).filter((row) => Object.keys(row).length > 1);
+}
+
+function executiveComparisonRowsForSelectedPeriod() {
+  if (executivePeriodGrain() !== "month") return executiveComparableRows(executivePeriodWeeks());
+  const month = executiveSelectedPeriod();
+  const currentRows = executiveMonthlyRows(month);
+  const latestCoveredDate = currentRows.reduce((latest, row) => {
+    const candidate = row.week < budgetMonthEnd(month) ? row.week : budgetMonthEnd(month);
+    return !latest || candidate > latest ? candidate : latest;
+  }, "");
+  if (!latestCoveredDate) return [];
+  const priorThrough = new Date(`${latestCoveredDate}T12:00:00Z`);
+  priorThrough.setUTCFullYear(priorThrough.getUTCFullYear() - 1);
+  return executiveMonthlyRows(shiftMonth(month, -12), { through: priorThrough.toISOString().slice(0, 10) });
 }
 
 function executiveFormat(value, kind = "number") {
@@ -717,13 +756,13 @@ function executiveCardMetric(rows, { key, aggregate = "mean", ratio }, showValue
   return showValue ? executiveMetric(rows, ratio.valueKey, "sum") : executiveRatioMetric(rows, ratio);
 }
 
-function executiveCardDetails({ id, label, key, kind, aggregate = "mean", lowerIsBetter = false, rows, comparisonRows, ratio, basis, valueToggle = false, valueToggleLabel = "£ value" }) {
+function executiveCardDetails({ id, label, key, kind, aggregate = "mean", lowerIsBetter = false, rows, comparisonRows, ratio, ratioTrendMode = "points", basis, valueToggle = false, valueToggleLabel = "£ value", suppressValueToggle = false }) {
   const showValue = Boolean((ratio || valueToggle) && state.executiveMetricModes?.[id] === "value");
   const current = executiveCardMetric(rows, { key, aggregate, ratio }, showValue);
   const previous = executiveCardMetric(comparisonRows, { key, aggregate, ratio }, showValue);
   const trend = comparisonRows.length ? executiveTrend(current, previous, {
     lowerIsBetter,
-    mode: ratio ? showValue ? "value" : "points" : showValue ? "value" : "relative",
+    mode: ratio ? showValue ? "value" : ratioTrendMode : showValue ? "value" : "relative",
     kind: ratio?.valueKind || kind,
   }) : null;
   return {
@@ -731,8 +770,8 @@ function executiveCardDetails({ id, label, key, kind, aggregate = "mean", lowerI
     trend,
     kind: ratio && showValue ? ratio.valueKind || "currency" : kind,
     label: ratio && showValue ? ratio.valueLabel || label : label,
-    basis: ratio ? showValue ? "Total for selected period" : "Percentage of sales for selected period" : basis || (aggregate === "sum" ? "Total for selected period" : "Average per reporting week"),
-    toggle: ratio || valueToggle ? `<button class="executive-value-toggle" type="button" data-action="toggle-executive-value" data-metric="${escapeHtml(id)}">${showValue ? "Show %" : escapeHtml(valueToggleLabel)}</button>` : "",
+    basis: ratio ? showValue ? "Total for selected period" : basis || "Percentage of sales for selected period" : basis || (aggregate === "sum" ? "Total for selected period" : "Average per reporting week"),
+    toggle: valueToggle || (ratio && !suppressValueToggle) ? `<button class="executive-value-toggle" type="button" data-action="toggle-executive-value" data-metric="${escapeHtml(id)}">${showValue ? "Show %" : escapeHtml(valueToggleLabel)}</button>` : "",
   };
 }
 
@@ -815,7 +854,7 @@ function renderExecutiveDriver(options) {
 const executiveMeasureDefinitions = [
   { id: "sales-ex", label: "Sales ex VAT", key: "salesEx", kind: "currency", aggregate: "sum", basis: "Total for selected period", valueToggle: true, valueToggleLabel: "£ change" },
   { id: "total-covers", label: "Total covers", key: "covers", kind: "number", aggregate: "sum", basis: "Total covers in selected period" },
-  { id: "spend-per-head", label: "Average spend per head", key: "spendPerHead", kind: "currency", basis: "Average per reporting week" },
+  { id: "spend-per-head", label: "Average spend per head", kind: "currency", ratio: { valueKey: "salesInc", denominatorKey: "covers", valueKind: "currency", valueLabel: "Sales inc VAT" }, ratioTrendMode: "relative", basis: "Sales inc VAT ÷ covers", suppressValueToggle: true },
   { id: "overall-gp", label: "Overall GP", kind: "percentage", ratio: { valueKey: "overallGpPounds", denominatorKey: "salesEx", valueKind: "currency", valueLabel: "Overall GP" } },
   { id: "total-wages", label: "Total wages as % of sales", kind: "percentage", ratio: { valueKey: "totalWages", denominatorKey: "salesEx", valueKind: "currency", valueLabel: "Total wages" }, lowerIsBetter: true },
   { id: "future-bookings", label: "Future bookings", key: "futureBookings", kind: "number", aggregate: "sum", basis: "Total bookings recorded in selected period" },
@@ -858,6 +897,32 @@ function executiveOffsetWeek(week, yearsBack) {
 function executiveSameWeekSets() {
   const window = executiveDetailWindow();
   const entries = state.executive?.rows || {};
+  if (executivePeriodGrain() === "month") {
+    const month = executiveSelectedPeriod();
+    const currentRows = executiveMonthlyRows(month);
+    const latestCoveredDate = currentRows.reduce((latest, row) => {
+      const candidate = row.week < budgetMonthEnd(month) ? row.week : budgetMonthEnd(month);
+      return !latest || candidate > latest ? candidate : latest;
+    }, "");
+    if (!latestCoveredDate) return { ...window, sets: [] };
+    const sets = [];
+    for (let yearsBack = 0; yearsBack < 5; yearsBack += 1) {
+      const period = shiftMonth(month, -12 * yearsBack);
+      const through = new Date(`${latestCoveredDate}T12:00:00Z`);
+      through.setUTCFullYear(through.getUTCFullYear() - yearsBack);
+      const rows = executiveMonthlyRows(period, { through: through.toISOString().slice(0, 10) });
+      if (!rows.length) break;
+      sets.push({
+        year: period.slice(0, 4),
+        weeks: rows.map((row) => row.week),
+        rows,
+        label: yearsBack === 0 ? window.title : monthTitle(period),
+        availableWeekCount: rows.length,
+        missingWeekCount: 0,
+      });
+    }
+    return { ...window, sets };
+  }
   if (!window.weeks.length) return { ...window, sets: [] };
   const sets = [];
   for (let yearsBack = 0; yearsBack < 5; yearsBack += 1) {
@@ -923,7 +988,7 @@ function executiveScenarioKey() {
 function executiveScenarioBaseline(rows) {
   const sales = executiveMetric(rows, "salesEx", "sum");
   const covers = executiveMetric(rows, "covers", "sum");
-  const spendPerHead = executiveMetric(rows, "spendPerHead", "mean");
+  const spendPerHead = executiveRatioMetric(rows, { numeratorKey: "salesInc", denominatorKey: "covers" });
   const grossProfit = executiveMetric(rows, "overallGpPounds", "sum");
   const wages = executiveMetric(rows, "totalWages", "sum");
   const foodSalesEx = executiveMetric(rows, "foodSalesInc", "sum") / 1.2;
@@ -1144,7 +1209,7 @@ function renderExecutiveScenarioPlannerV2(rows) {
 
 function applyExecutiveScenario() {
   const planner = document.querySelector("#executive-scenario");
-  const rows = executiveRowsForWeeks(executivePeriodWeeks());
+  const rows = executiveRowsForSelectedPeriod();
   const { baseline, scenario } = executiveScenarioForRows(rows);
   if (!planner || !baseline || !scenario) return;
   const inputFor = (field) => planner.querySelector(`[data-action='edit-executive-scenario'][data-field='${field}']`);
@@ -1212,11 +1277,13 @@ function renderExecutiveDashboard() {
   const selectedPeriod = executiveSelectedPeriod();
   const periodOptions = executivePeriodOptions(grain);
   const weeks = executivePeriodWeeks();
-  const rows = executiveRowsForWeeks(weeks);
+  const rows = executiveRowsForSelectedPeriod();
   const showingAllAvailableData = grain === "all";
-  const comparisonRows = showingAllAvailableData ? [] : executiveComparableRows(weeks);
+  const comparisonRows = showingAllAvailableData ? [] : executiveComparisonRowsForSelectedPeriod();
   const comparisonNote = showingAllAvailableData
     ? "All reporting data is shown together, without a combined year-on-year comparison."
+    : grain === "month" && comparisonRows.length
+      ? "Monthly cards use the same weekday-weighted split and the matching calendar days last year."
     : comparisonRows.length === rows.length && rows.length
       ? "Card comparisons use the matching reporting weeks from one year earlier."
       : comparisonRows.length
@@ -1239,11 +1306,11 @@ function renderExecutiveDashboard() {
   return `<section class="executive-page">
     <button class="back-link" type="button" data-section="hub">&larr; Information Hub</button>
     <div class="executive-hero"><p class="eyebrow">LARDER EXECUTIVE DASHBOARD</p><h2>Business trajectory</h2><p>See how volume, value, margin and labour have moved together—and which indicators are shaping the next few months.</p><img class="executive-hero__logo" src="./assets/larder-logo.png" alt="Larder Brasserie and Grill" /></div>
-    <section class="executive-controls" aria-label="Executive dashboard period"><label>View by<select data-action="executive-grain"><option value="month" ${grain === "month" ? "selected" : ""}>Month</option><option value="quarter" ${grain === "quarter" ? "selected" : ""}>Quarter</option><option value="year" ${grain === "year" ? "selected" : ""}>Calendar year</option><option value="financial-year" ${grain === "financial-year" ? "selected" : ""}>Financial year (May–Apr)</option><option value="latest-13" ${grain === "latest-13" ? "selected" : ""}>Latest 13 weeks</option><option value="all" ${grain === "all" ? "selected" : ""}>All available data</option></select></label>${periodOptions.length ? `<label>Period<select data-action="executive-period">${periodOptions.map((option) => `<option value="${escapeHtml(option.value)}" ${selectedPeriod === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select></label>` : ""}<button class="executive-scenario-button" type="button" data-action="open-executive-scenario"><span aria-hidden="true">∑</span> Scenario planner</button><p><strong>${escapeHtml(executivePeriodTitle())}</strong><span>${rows.length} reporting weeks · ${comparisonNote}</span></p></section>
+    <section class="executive-controls" aria-label="Executive dashboard period"><label>View by<select data-action="executive-grain"><option value="month" ${grain === "month" ? "selected" : ""}>Month</option><option value="quarter" ${grain === "quarter" ? "selected" : ""}>Quarter</option><option value="year" ${grain === "year" ? "selected" : ""}>Calendar year</option><option value="financial-year" ${grain === "financial-year" ? "selected" : ""}>Financial year (May–Apr)</option><option value="latest-13" ${grain === "latest-13" ? "selected" : ""}>Latest 13 weeks</option><option value="all" ${grain === "all" ? "selected" : ""}>All available data</option></select></label>${periodOptions.length ? `<label>Period<select data-action="executive-period">${periodOptions.map((option) => `<option value="${escapeHtml(option.value)}" ${selectedPeriod === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select></label>` : ""}<button class="executive-scenario-button" type="button" data-action="open-executive-scenario"><span aria-hidden="true">∑</span> Scenario planner</button><p><strong>${escapeHtml(executivePeriodTitle())}</strong><span>${rows.length} ${grain === "month" ? "reporting-week portions · weekday-weighted split" : "reporting weeks"} · ${comparisonNote}</span></p></section>
     <section class="executive-kpis" aria-label="Executive key performance indicators">
       ${renderExecutiveKpi({ id: "sales-ex", label: "Sales ex VAT", key: "salesEx", kind: "currency", aggregate: "sum", basis: "Total for selected period", valueToggle: true, valueToggleLabel: "£ change", rows, comparisonRows })}
       ${renderExecutiveKpi({ id: "total-covers", label: "Total covers", key: "covers", kind: "number", aggregate: "sum", basis: "Total covers in selected period", rows, comparisonRows })}
-      ${renderExecutiveKpi({ id: "spend-per-head", label: "Average spend per head", key: "spendPerHead", kind: "currency", basis: "Average per reporting week", rows, comparisonRows })}
+      ${renderExecutiveKpi({ id: "spend-per-head", label: "Average spend per head", kind: "currency", ratio: { valueKey: "salesInc", denominatorKey: "covers", valueKind: "currency", valueLabel: "Sales inc VAT" }, ratioTrendMode: "relative", basis: "Sales inc VAT ÷ covers", suppressValueToggle: true, rows, comparisonRows })}
       ${renderExecutiveKpi({ id: "overall-gp", label: "Overall GP", kind: "percentage", ratio: overallGp, rows, comparisonRows })}
       ${renderExecutiveKpi({ id: "total-wages", label: "Total wages as % of sales", kind: "percentage", ratio: totalWages, lowerIsBetter: true, rows, comparisonRows })}
       ${renderExecutiveKpi({ id: "future-bookings", label: "Future bookings", key: "futureBookings", kind: "number", aggregate: "sum", basis: "Total bookings recorded in selected period", rows, comparisonRows })}
@@ -1500,10 +1567,9 @@ function renderProfitPlanBudget(year) {
       ${renderProfitPlanSummaryCard("Operating-profit target", executiveFormat(budget.annual.operatingProfit, "currency"), "After labour and operating costs", "positive")}
     </div>
     ${priorActual ? `<div class="profit-budget__drivers"><article><span>Sales growth</span><strong>${profitPlanSignedCurrency(salesGrowth)}</strong><small>Budgeted turnover above last year</small></article><article><span>Gross-profit gain</span><strong>${profitPlanSignedCurrency(grossProfitGrowth)}</strong><small>Sales and margin combined</small></article><article><span>Operating-cost reduction</span><strong>${profitPlanSignedCurrency(operatingCostSaving)}</strong><small>Including labour in the accountant model</small></article></div>` : ""}
-    <details class="profit-budget__months"><summary>View the monthly budget</summary><p>Actual sales come from the weekly Master Sheet. Only completed months receive a variance; the latest month is clearly shown as a work-in-progress checkpoint.</p><div class="profit-budget__table-wrap"><table><thead><tr><th>Month</th><th>Sales budget</th><th>Actual sales</th><th>Variance</th><th>Operating-profit budget</th></tr></thead><tbody>${budget.months.map((month) => {
-      const monthlyRows = profitPlanFinancialYearRows(year).filter((row) => row.week.startsWith(month.month));
-      const actualSales = executiveMetric(monthlyRows, "salesEx", "sum");
-      const latestLoadedMonth = profitPlanFinancialYearRows(year).at(-1)?.week?.slice(0, 7) || "";
+    <details class="profit-budget__months"><summary>View the monthly budget</summary><p>Until daily sales are available, reporting weeks that cross a month are allocated using the usual Monday–Sunday sales mix. Only completed months receive a variance; the latest month is clearly shown as a work-in-progress checkpoint.</p><div class="profit-budget__table-wrap"><table><thead><tr><th>Month</th><th>Sales budget</th><th>Actual sales</th><th>Variance</th><th>Operating-profit budget</th></tr></thead><tbody>${budget.months.map((month) => {
+      const actualSales = budgetMonthlyActuals(month.month, executiveRows(), budgetSalesCutoff(year)).actualSales;
+      const latestLoadedMonth = budgetSalesCutoff(year).slice(0, 7) || "";
       const monthInProgress = month.month === latestLoadedMonth;
       const completed = month.month < latestLoadedMonth;
       const variance = completed && Number.isFinite(actualSales) ? actualSales - month.sales : null;
@@ -1536,10 +1602,93 @@ function budgetReportingWeeks(month) {
   const finalDay = new Date(Date.UTC(year, monthNumber, 0));
   const firstSundayOffset = (7 - first.getUTCDay()) % 7;
   const weeks = [];
-  for (let date = new Date(Date.UTC(year, monthNumber - 1, 1 + firstSundayOffset)); date <= finalDay; date.setUTCDate(date.getUTCDate() + 7)) {
+  // A reporting week ends on Sunday. Include the following Sunday when its
+  // Monday–Sunday reporting period contains the last day of this month.
+  const finalReportingWeek = new Date(finalDay);
+  finalReportingWeek.setUTCDate(finalReportingWeek.getUTCDate() + (7 - finalDay.getUTCDay()) % 7);
+  for (let date = new Date(Date.UTC(year, monthNumber - 1, 1 + firstSundayOffset)); date <= finalReportingWeek; date.setUTCDate(date.getUTCDate() + 7)) {
     weeks.push(date.toISOString().slice(0, 10));
   }
   return weeks;
+}
+
+function budgetMonthCalendarDays(month) {
+  const [year, monthNumber] = plainText(month).split("-").map(Number);
+  if (!Number.isFinite(year) || !Number.isFinite(monthNumber)) return 0;
+  return new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+}
+
+const budgetTypicalDailySalesWeights = [0.0001, 0.0806, 0.0991, 0.134, 0.2153, 0.3125, 0.1583];
+
+function budgetDayTradeWeight(date) {
+  const weekday = date.getUTCDay();
+  const mondayFirstIndex = (weekday + 6) % 7;
+  return budgetTypicalDailySalesWeights[mondayFirstIndex] || 0;
+}
+
+function budgetMonthTradeWeight(month, through = "") {
+  const [year, monthNumber] = plainText(month).split("-").map(Number);
+  if (!Number.isFinite(year) || !Number.isFinite(monthNumber)) return 0;
+  const start = new Date(Date.UTC(year, monthNumber - 1, 1));
+  const finalDay = new Date(Date.UTC(year, monthNumber, 0));
+  const throughDate = through ? new Date(`${plainText(through)}T12:00:00Z`) : null;
+  const end = throughDate && !Number.isNaN(throughDate.getTime()) ? new Date(Math.min(finalDay.getTime(), throughDate.getTime())) : finalDay;
+  let total = 0;
+  for (let date = new Date(start); date <= end; date.setUTCDate(date.getUTCDate() + 1)) total += budgetDayTradeWeight(date);
+  return total;
+}
+
+function budgetWeekMonthAllocation(week, month, through = "") {
+  const weekEnd = new Date(`${plainText(week)}T00:00:00Z`);
+  const [year, monthNumber] = plainText(month).split("-").map(Number);
+  if (Number.isNaN(weekEnd.getTime()) || !Number.isFinite(year) || !Number.isFinite(monthNumber)) return { days: 0, share: 0, tradeWeight: 0 };
+  const weekStart = new Date(weekEnd);
+  weekStart.setUTCDate(weekStart.getUTCDate() - 6);
+  const monthStart = new Date(Date.UTC(year, monthNumber - 1, 1));
+  const monthEnd = new Date(Date.UTC(year, monthNumber, 0));
+  const throughDate = through ? new Date(`${plainText(through)}T00:00:00Z`) : null;
+  const effectiveMonthEnd = throughDate && !Number.isNaN(throughDate.getTime()) ? new Date(Math.min(monthEnd.getTime(), throughDate.getTime())) : monthEnd;
+  const overlapStart = Math.max(weekStart.getTime(), monthStart.getTime());
+  const overlapEnd = Math.min(weekEnd.getTime(), effectiveMonthEnd.getTime());
+  const days = overlapEnd < overlapStart ? 0 : Math.floor((overlapEnd - overlapStart) / 86400000) + 1;
+  if (!days) return { days: 0, share: 0, tradeWeight: 0 };
+  let tradeWeight = 0;
+  for (let date = new Date(overlapStart); date.getTime() <= overlapEnd; date.setUTCDate(date.getUTCDate() + 1)) tradeWeight += budgetDayTradeWeight(date);
+  const weekTradeWeight = budgetTypicalDailySalesWeights.reduce((total, value) => total + value, 0);
+  return { days, share: weekTradeWeight ? tradeWeight / weekTradeWeight : days / 7, tradeWeight };
+}
+
+function budgetMonthlyActuals(month, rows, cutoff = "") {
+  const allocations = (rows || []).map((row) => {
+    const allocation = budgetWeekMonthAllocation(row?.week, month);
+    return { row, ...allocation };
+  }).filter(({ row, days }) => days > 0 && row?.week && (!cutoff || row.week <= cutoff));
+  const total = (key) => {
+    let hasValue = false;
+    const value = allocations.reduce((sum, { row, share }) => {
+      const amount = executiveValue(row, key);
+      if (!Number.isFinite(amount)) return sum;
+      hasValue = true;
+      return sum + amount * share;
+    }, 0);
+    return hasValue ? value : null;
+  };
+  const actualSales = total("salesEx");
+  const actualSalesInc = total("salesInc");
+  const actualCovers = total("covers");
+  const actualCalendarDays = allocations.reduce((sum, { days, row }) => Number.isFinite(executiveValue(row, "salesEx")) ? sum + days : sum, 0);
+  const actualTradeWeight = allocations.reduce((sum, { tradeWeight, row }) => Number.isFinite(executiveValue(row, "salesEx")) ? sum + tradeWeight : sum, 0);
+  return {
+    allocations,
+    actualRows: allocations.map(({ row }) => row),
+    hasActuals: allocations.length > 0,
+    actualSales: actualSales ?? 0,
+    actualSalesInc: actualSalesInc ?? 0,
+    actualCovers: actualCovers ?? 0,
+    actualSpendPerHead: Number.isFinite(actualSalesInc) && Number.isFinite(actualCovers) && actualCovers > 0 ? actualSalesInc / actualCovers : null,
+    actualCalendarDays,
+    actualTradeWeight,
+  };
 }
 
 function budgetPreviousYearSpendPerHead(year) {
@@ -1549,8 +1698,7 @@ function budgetPreviousYearSpendPerHead(year) {
 
 function budgetSameMonthLastYearSpendPerHead(month) {
   const priorMonth = shiftMonth(month, -12);
-  const rows = executiveRows().filter((row) => monthKey(row.week) === priorMonth);
-  return executiveRatioMetric(rows, { numeratorKey: "salesInc", denominatorKey: "covers" });
+  return budgetMonthlyActuals(priorMonth, executiveRows()).actualSpendPerHead;
 }
 
 function budgetFormatSpendPerHead(value) {
@@ -1565,7 +1713,7 @@ function budgetMonthEnd(month) {
 }
 
 function budgetSalesCutoff(year) {
-  const weeks = profitPlanFinancialYearRows(year).map((row) => row.week).filter(Boolean).sort();
+  const weeks = executiveRows().map((row) => row.week).filter(Boolean).sort();
   // Budget & Targets is always a live plan, so it uses the latest actual week
   // loaded from the Master Sheet rather than the date selected in Weekly Reports.
   return weeks.at(-1) || "";
@@ -1582,48 +1730,48 @@ function budgetSalesPlan(year) {
   if (!budget?.months?.length || !Number.isFinite(annualPreviousYearSpendPerHead) || annualPreviousYearSpendPerHead <= 0) return null;
   const overrides = state.budgetSalesAssumptions?.[year] || {};
   const cutoff = budgetSalesCutoff(year);
-  const yearRows = profitPlanFinancialYearRows(year);
+  const actualSourceRows = executiveRows();
   const seedMonths = budget.months.map((month) => {
     const reportingWeeks = budgetReportingWeeks(month.month);
     const weekCount = reportingWeeks.length;
+    const calendarDays = budgetMonthCalendarDays(month.month);
+    const monthTradeWeight = budgetMonthTradeWeight(month.month);
+    const equivalentWeeks = calendarDays / 7;
     const priorMonth = shiftMonth(month.month, -12);
     const sameMonthLastYearSpendPerHead = budgetSameMonthLastYearSpendPerHead(month.month);
     const hasSameMonthLastYearSpendPerHead = Number.isFinite(sameMonthLastYearSpendPerHead) && sameMonthLastYearSpendPerHead > 0;
     const startingSpendPerHead = hasSameMonthLastYearSpendPerHead ? sameMonthLastYearSpendPerHead : annualPreviousYearSpendPerHead;
     // The accountant budget is ex VAT, while SPH is deliberately shown inc VAT
     // because it is the more familiar operational measure for the team.
-    const defaultCoversPerWeek = weekCount ? (month.sales * 1.2) / startingSpendPerHead / weekCount : 0;
+    const defaultCoversPerWeek = equivalentWeeks ? (month.sales * 1.2) / startingSpendPerHead / equivalentWeeks : 0;
     const saved = overrides[month.month] || {};
     const hasCoversOverride = plainText(saved.coversPerWeek) !== "" && Number.isFinite(Number(saved.coversPerWeek)) && Number(saved.coversPerWeek) >= 0;
     const hasSpendOverride = plainText(saved.spendPerHead) !== "" && Number.isFinite(Number(saved.spendPerHead)) && Number(saved.spendPerHead) > 0;
     const coversPerWeek = hasCoversOverride ? Number(saved.coversPerWeek) : defaultCoversPerWeek;
     const spendPerHead = hasSpendOverride ? Number(saved.spendPerHead) : startingSpendPerHead;
-    const baseSalesTarget = coversPerWeek * weekCount * spendPerHead / 1.2;
-    const actualRows = yearRows.filter((row) => monthKey(row.week) === month.month && (!cutoff || row.week <= cutoff));
-    const hasActuals = actualRows.length > 0;
-    const actualSales = executiveMetric(actualRows, "salesEx", "sum") ?? 0;
-    const actualCovers = executiveMetric(actualRows, "covers", "sum") ?? 0;
-    const actualSpendPerHead = executiveRatioMetric(actualRows, { numeratorKey: "salesInc", denominatorKey: "covers" });
+    const baseSalesTarget = coversPerWeek * equivalentWeeks * spendPerHead / 1.2;
+    const actuals = budgetMonthlyActuals(month.month, actualSourceRows, cutoff);
     return {
       ...month,
       reportingWeeks,
       weekCount,
+      calendarDays,
+      monthTradeWeight,
+      equivalentWeeks,
       defaultCoversPerWeek,
       priorMonth,
       startingSpendPerHead,
       usesAnnualSpendFallback: !hasSameMonthLastYearSpendPerHead,
+      hasCoversOverride,
+      hasSpendOverride,
       coversPerWeek,
       spendPerHead,
-      plannedMonthlyCovers: coversPerWeek * weekCount,
+      plannedMonthlyCovers: coversPerWeek * equivalentWeeks,
       baseSalesTarget,
-      baseSpendPerHeadTarget: coversPerWeek * weekCount ? baseSalesTarget * 1.2 / (coversPerWeek * weekCount) : null,
+      baseSpendPerHeadTarget: coversPerWeek * equivalentWeeks ? baseSalesTarget * 1.2 / (coversPerWeek * equivalentWeeks) : null,
       cutoff,
       status: budgetSalesMonthStatus(month.month, cutoff),
-      actualRows,
-      hasActuals,
-      actualSales,
-      actualCovers,
-      actualSpendPerHead,
+      ...actuals,
     };
   });
   const completedMonths = seedMonths.filter((month) => month.status === "complete");
@@ -1633,59 +1781,80 @@ function budgetSalesPlan(year) {
   const sharedSalesUplift = remainingBudgetSales ? completedGap / remainingBudgetSales : 0;
   const months = seedMonths.map((month) => {
     const reforecastSalesTarget = month.status === "complete" ? month.actualSales : month.baseSalesTarget * (1 + sharedSalesUplift);
-    const reforecastSpendPerHeadTarget = month.plannedMonthlyCovers ? reforecastSalesTarget * 1.2 / month.plannedMonthlyCovers : null;
+    const reforecastSpendPerHeadTarget = month.status === "complete"
+      ? month.baseSpendPerHeadTarget
+      : month.spendPerHead;
+    const reforecastMonthlyCovers = reforecastSpendPerHeadTarget > 0 ? reforecastSalesTarget * 1.2 / reforecastSpendPerHeadTarget : 0;
+    const reforecastCoversPerWeek = month.equivalentWeeks ? reforecastMonthlyCovers / month.equivalentWeeks : 0;
     const remainingWeeks = month.reportingWeeks.filter((week) => !cutoff || week > cutoff);
     const remainingWeekCount = remainingWeeks.length;
     const remainingSalesNeeded = month.status === "active" ? Math.max(0, reforecastSalesTarget - month.actualSales) : month.status === "future" ? reforecastSalesTarget : 0;
-    const remainingCoversNeeded = month.status === "active" ? Math.max(0, month.plannedMonthlyCovers - month.actualCovers) : month.status === "future" ? month.plannedMonthlyCovers : 0;
-    // The remaining weekly cover target stays at the planned covers-per-week.
-    // Use that same remaining cover total when calculating required SPH so the
-    // weekly Sales, Covers and SPH targets reconcile with each other.
-    const remainingPlannedCovers = month.status === "active" ? month.coversPerWeek * remainingWeekCount : remainingCoversNeeded;
-    const requiredSpendPerHead = remainingPlannedCovers > 0 ? remainingSalesNeeded * 1.2 / remainingPlannedCovers : null;
-    const targetSpendPerHead = month.status === "complete" ? month.baseSpendPerHeadTarget : month.status === "active" ? requiredSpendPerHead : reforecastSpendPerHeadTarget;
-    const weeklyFutureSalesTarget = remainingWeekCount ? remainingSalesNeeded / remainingWeekCount : 0;
-    const weeklyFutureSpendPerHeadTarget = month.status === "active" ? requiredSpendPerHead : month.status === "future" ? reforecastSpendPerHeadTarget : month.baseSpendPerHeadTarget;
+    const remainingCoversNeeded = month.status === "active" ? Math.max(0, reforecastMonthlyCovers - month.actualCovers) : month.status === "future" ? reforecastMonthlyCovers : 0;
+    // This is deliberately separate from the covers plan. It answers the
+    // operational question: at the SPH actually being achieved so far, how
+    // many further covers would deliver the remaining sales target?
+    const coversNeededAtCurrentSpend = month.status === "active" && month.actualSpendPerHead > 0
+      ? Math.max(0, remainingSalesNeeded * 1.2 / month.actualSpendPerHead)
+      : null;
+    const coversNeededAtCurrentSpendPerWeek = coversNeededAtCurrentSpend !== null && remainingWeekCount
+      ? coversNeededAtCurrentSpend / remainingWeekCount
+      : null;
+    // Targets remain the agreed budget (or a manual change). A live month can
+    // be ahead or behind that plan, but actual SPH never silently becomes a
+    // new target. The separate blue bar shows its live covers implication.
+    const targetSpendPerHead = month.status === "complete" ? month.baseSpendPerHeadTarget : reforecastSpendPerHeadTarget;
     const actualRowsByWeek = new Map(month.actualRows.map((row) => [row.week, row]));
     const weekly = month.reportingWeeks.map((week) => {
       const actual = actualRowsByWeek.get(week);
       const hasActual = Boolean(actual);
-      const actualSales = hasActual ? executiveValue(actual, "salesEx") : null;
-      const actualCovers = hasActual ? executiveValue(actual, "covers") : null;
+      const { days, share, tradeWeight } = budgetWeekMonthAllocation(week, month.month);
+      const tradeShare = month.monthTradeWeight ? tradeWeight / month.monthTradeWeight : 0;
+      const weeklySales = hasActual ? executiveValue(actual, "salesEx") : null;
+      const weeklyCovers = hasActual ? executiveValue(actual, "covers") : null;
+      const actualSales = Number.isFinite(weeklySales) ? weeklySales * share : null;
+      const actualCovers = Number.isFinite(weeklyCovers) ? weeklyCovers * share : null;
       const actualSpendPerHead = hasActual ? executiveRatioMetric([actual], { numeratorKey: "salesInc", denominatorKey: "covers" }) : null;
       const pastWeek = Boolean(cutoff && week <= cutoff);
+      const salesPlan = month.status === "complete" ? month.baseSalesTarget : reforecastSalesTarget;
+      const coversPlan = month.status === "complete" ? month.plannedMonthlyCovers : reforecastMonthlyCovers;
       return {
         week,
+        daysInMonth: days,
+        tradeWeight,
+        tradeShare,
         hasActual,
         pastWeek,
         actualSales,
         actualCovers,
         actualSpendPerHead,
-        targetSales: hasActual || month.status === "complete" ? month.baseSalesTarget / month.weekCount : weeklyFutureSalesTarget,
-        targetCovers: month.coversPerWeek,
-        targetSpendPerHead: hasActual || month.status === "complete" ? month.baseSpendPerHeadTarget : weeklyFutureSpendPerHeadTarget,
+        targetSales: salesPlan * tradeShare,
+        targetCovers: coversPlan * tradeShare,
+        targetSpendPerHead: month.status === "complete" ? month.baseSpendPerHeadTarget : reforecastSpendPerHeadTarget,
       };
     });
     const actualWeekCount = weekly.filter((week) => week.hasActual).length;
     const summarySalesTarget = month.status === "complete" ? month.baseSalesTarget : reforecastSalesTarget;
-    const summaryCoversTarget = month.plannedMonthlyCovers;
+    const summaryCoversTarget = month.status === "complete" ? month.plannedMonthlyCovers : reforecastMonthlyCovers;
     const summarySpendPerHeadTarget = month.status === "complete" ? month.baseSpendPerHeadTarget : reforecastSpendPerHeadTarget;
-    const summarySalesValue = month.status === "active" && actualWeekCount ? month.actualSales / actualWeekCount * month.weekCount : month.status === "complete" ? month.actualSales : reforecastSalesTarget;
-    const summaryCoversValue = month.status === "active" && actualWeekCount ? month.actualCovers / actualWeekCount * month.weekCount : month.status === "complete" ? month.actualCovers : month.plannedMonthlyCovers;
+    const reportingProgress = month.status === "active" && month.monthTradeWeight ? month.actualTradeWeight / month.monthTradeWeight : month.status === "complete" ? 1 : 0;
+    const summarySalesValue = month.status === "active" && reportingProgress ? month.actualSales / reportingProgress : month.status === "complete" ? month.actualSales : reforecastSalesTarget;
+    const summaryCoversValue = month.status === "active" && reportingProgress ? month.actualCovers / reportingProgress : month.status === "complete" ? month.actualCovers : reforecastMonthlyCovers;
     const summarySpendPerHeadValue = month.status === "active" || month.status === "complete" ? month.actualSpendPerHead : reforecastSpendPerHeadTarget;
-    const reportingProgress = month.status === "active" && month.weekCount ? actualWeekCount / month.weekCount : month.status === "complete" ? 1 : 0;
     const salesPaceTarget = summarySalesTarget * reportingProgress;
     const coversPaceTarget = summaryCoversTarget * reportingProgress;
     return {
       ...month,
       reforecastSalesTarget,
       reforecastSpendPerHeadTarget,
+      reforecastMonthlyCovers,
+      reforecastCoversPerWeek,
       remainingWeeks,
       remainingWeekCount,
+      remainingCalendarDays: Math.max(0, month.calendarDays - month.actualCalendarDays),
       remainingSalesNeeded,
       remainingCoversNeeded,
-      remainingPlannedCovers,
-      requiredSpendPerHead,
+      coversNeededAtCurrentSpend,
+      coversNeededAtCurrentSpendPerWeek,
       targetSpendPerHead,
       weekly,
       actualWeekCount,
@@ -1699,7 +1868,7 @@ function budgetSalesPlan(year) {
       salesPaceTarget,
       coversPaceTarget,
       monthlySalesTarget: reforecastSalesTarget,
-      weeklySalesTarget: month.status === "active" && remainingWeekCount ? weeklyFutureSalesTarget : reforecastSalesTarget / month.weekCount,
+      weeklySalesTarget: month.equivalentWeeks ? reforecastSalesTarget / month.equivalentWeeks : 0,
       variance: reforecastSalesTarget - month.sales,
     };
   });
@@ -1725,9 +1894,12 @@ function budgetSalesVarianceTone(value) {
   return value > 0 ? "above-budget" : "below-budget";
 }
 
-function budgetSalesBarTone(value, target, { plan = false } = {}) {
+function budgetSalesBarTone(value, target, { plan = false, kind = "number" } = {}) {
   if (plan || !Number.isFinite(Number(value)) || !Number.isFinite(Number(target))) return "plan";
-  return budgetSalesVarianceTone(Number(value) - Number(target));
+  const variance = Number(value) - Number(target);
+  if (variance >= -.5) return "above-budget";
+  const closeToTarget = kind === "currency" ? 2000 : kind === "sph" ? 5 : 200;
+  return Math.abs(variance) <= closeToTarget ? "near-target" : "below-budget";
 }
 
 function budgetSalesBarScale(value, target, { scaleTarget = null } = {}) {
@@ -1744,38 +1916,73 @@ function budgetSalesBarFormat(value, kind) {
   return kind === "sph" ? budgetFormatSpendPerHead(value) : executiveFormat(value, kind);
 }
 
-function renderBudgetSalesMonthBar(label, value, target, kind = "number", valueLabel = "Actual", { plan = false, targetLabel = "Target", comparisonLabel = "target", scaleTarget = null } = {}) {
-  const tone = budgetSalesBarTone(value, target, { plan });
-  const { fill, marker } = budgetSalesBarScale(value, target, { scaleTarget });
-  const difference = Number.isFinite(Number(value)) && Number.isFinite(Number(target)) ? Number(value) - Number(target) : null;
-  const change = plan ? "Not started" : difference === null ? "No actuals yet" : Math.abs(difference) < .5 ? `On ${comparisonLabel}` : `${difference > 0 ? "Up" : "Down"} ${budgetSalesBarFormat(Math.abs(difference), kind)} vs ${comparisonLabel}`;
-  const track = plan ? "" : `<i style="width:${fill.toFixed(2)}%"></i><em style="left:${marker.toFixed(2)}%"></em>`;
-  return `<section class="budget-sales-month-bar budget-sales-month-bar--${tone}"><div><span>${escapeHtml(label)}</span><strong>${budgetSalesBarFormat(value, kind)}</strong></div><p><i>${escapeHtml(valueLabel)}</i><b>${escapeHtml(targetLabel)} ${budgetSalesBarFormat(target, kind)}</b></p><div class="budget-sales-month-bar__track" role="img" aria-label="${escapeHtml(label)}: ${plan ? "not started" : `${escapeHtml(valueLabel)} ${budgetSalesBarFormat(value, kind)} against ${escapeHtml(comparisonLabel)} ${budgetSalesBarFormat(target, kind)}`}">${track}</div><small>${escapeHtml(change)}</small></section>`;
+function renderBudgetSalesMonthBar(label, value, target, kind = "number", valueLabel = "Actual", { plan = false, targetLabel = "Target", comparisonLabel = "target", scaleTarget = null, progressToTotal = true, paceTarget = null, toneOverride = "", changeOverride = "", changeToneOverride = "" } = {}) {
+  const fullTarget = Number.isFinite(Number(scaleTarget)) && Number(scaleTarget) > 0 && progressToTotal ? Number(scaleTarget) : target;
+  const performanceTarget = paceTarget !== null && paceTarget !== "" && Number.isFinite(Number(paceTarget)) ? Number(paceTarget) : target;
+  const tone = toneOverride || budgetSalesBarTone(value, performanceTarget, { plan, kind });
+  const { fill, marker } = budgetSalesBarScale(value, progressToTotal ? fullTarget : target, { scaleTarget: progressToTotal ? fullTarget : scaleTarget });
+  const difference = Number.isFinite(Number(value)) && Number.isFinite(Number(fullTarget)) ? Number(fullTarget) - Number(value) : null;
+  const change = changeOverride || (plan
+    ? "Not started"
+    : difference === null
+      ? "No actuals yet"
+      : progressToTotal
+        ? Math.abs(difference) < .5 ? "Plan reached" : difference > 0 ? `${budgetSalesBarFormat(difference, kind)} still needed` : `Up ${budgetSalesBarFormat(Math.abs(difference), kind)} vs ${comparisonLabel}`
+        : Math.abs(difference) < .5 ? `On ${comparisonLabel}` : difference < 0 ? `Up ${budgetSalesBarFormat(Math.abs(difference), kind)} vs ${comparisonLabel}` : `Down ${budgetSalesBarFormat(difference, kind)} vs ${comparisonLabel}`);
+  const changeTone = changeToneOverride || (plan || difference === null ? "" : Math.abs(difference) < .5 ? "reached" : difference > 0 ? "needed" : "up");
+  const track = plan ? "" : `<i style="width:${fill.toFixed(2)}%"></i>${progressToTotal ? "" : `<em style="left:${marker.toFixed(2)}%"></em>`}`;
+  return `<section class="budget-sales-month-bar budget-sales-month-bar--${tone}"><div><span>${escapeHtml(label)}</span><strong>${budgetSalesBarFormat(value, kind)}</strong></div><p><i>${escapeHtml(valueLabel)}</i><b>${escapeHtml(targetLabel)} ${budgetSalesBarFormat(fullTarget, kind)}</b></p><div class="budget-sales-month-bar__track" role="img" aria-label="${escapeHtml(label)}: ${plan ? "not started" : `${escapeHtml(valueLabel)} ${budgetSalesBarFormat(value, kind)} against ${escapeHtml(targetLabel.toLowerCase())} ${budgetSalesBarFormat(fullTarget, kind)}`}">${track}</div><small class="budget-sales-month-bar__change${changeTone ? ` budget-sales-month-bar__change--${changeTone}` : ""}">${escapeHtml(change)}</small></section>`;
 }
 
 function renderBudgetSalesMonthProgress(month) {
   if (month.status !== "active") return "";
   const progress = Math.max(0, Math.min(1, Number(month.reportingProgress) || 0));
   const percentage = Math.round(progress * 100);
-  const completedWeeks = Number(month.actualWeekCount) || 0;
-  const totalWeeks = Number(month.weekCount) || 0;
-  const weekLabel = totalWeeks === 1 ? "reporting week" : "reporting weeks";
-  return `<section class="budget-sales-month__progress" aria-label="Month progress"><div><span>Month progress</span><strong>${completedWeeks} of ${totalWeeks} ${weekLabel} · ${percentage}%</strong></div><div class="budget-sales-month__progress-track" role="progressbar" aria-label="${escapeHtml(month.label)} reporting-week progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percentage}"><i style="width:${percentage}%"></i></div><small>Sales and covers are measured against the same ${percentage}% point of the monthly plan.</small></section>`;
+  const actualDays = Number(month.actualCalendarDays) || 0;
+  const totalDays = Number(month.calendarDays) || 0;
+  const dayLabel = totalDays === 1 ? "calendar day" : "calendar days";
+  return `<section class="budget-sales-month__progress" aria-label="Month progress"><div><span>Month progress</span><strong>${actualDays} of ${totalDays} ${dayLabel} · ${percentage}% trade-weighted</strong></div><div class="budget-sales-month__progress-track" role="progressbar" aria-label="${escapeHtml(month.label)} trade-weighted month progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percentage}"><i style="width:${percentage}%"></i></div><small>The bar follows the usual Monday–Sunday sales mix until daily sales are available.</small></section>`;
+}
+
+function renderBudgetSalesLiveCovers(month) {
+  if (month.status !== "active" || month.coversNeededAtCurrentSpend === null) return "";
+  const coversStillNeeded = Math.ceil(month.coversNeededAtCurrentSpend);
+  const coversForecast = month.actualCovers + month.coversNeededAtCurrentSpend;
+  const fullCoversPlan = month.reforecastMonthlyCovers;
+  const difference = coversForecast - fullCoversPlan;
+  const coverLabel = coversStillNeeded === 1 ? "cover" : "covers";
+  const planComparison = Math.abs(difference) < .5
+    ? "matches the full covers plan"
+    : `${Math.abs(Math.round(difference))} ${Math.abs(Math.round(difference)) === 1 ? "cover" : "covers"} ${difference < 0 ? "fewer" : "more"} than the full covers plan`;
+  const needText = month.remainingSalesNeeded <= 0
+    ? "Sales target reached"
+    : `${coversStillNeeded} ${coverLabel} still needed · ${planComparison}`;
+  return renderBudgetSalesMonthBar("Covers forecast at current SPH", coversForecast, fullCoversPlan, "number", "Forecast", {
+    targetLabel: "Plan",
+    comparisonLabel: "plan",
+    progressToTotal: true,
+    toneOverride: "live-covers",
+    changeOverride: needText,
+    changeToneOverride: month.remainingSalesNeeded > .5 ? "needed" : "reached"
+  });
 }
 
 function renderBudgetSalesProjection(month) {
   if (month.status !== "active") return "";
-  const weekLabel = month.actualWeekCount === 1 ? "reporting week" : "reporting weeks";
-  return `<section class="budget-sales-projection" aria-label="${escapeHtml(month.label)} projected month-end"><header><div><span>Projected month-end</span><strong>Current run-rate forecast</strong></div><small>Based on ${month.actualWeekCount} completed ${weekLabel}; this does not replace the actual-to-date view.</small></header><div class="budget-sales-projection__bars">${renderBudgetSalesMonthBar("Sales ex VAT", month.summarySalesValue, month.summarySalesTarget, "currency", "Projected")}${renderBudgetSalesMonthBar("Covers", month.summaryCoversValue, month.summaryCoversTarget, "number", "Projected")}${renderBudgetSalesMonthBar("SPH inc VAT", month.summarySpendPerHeadValue, month.summarySpendPerHeadTarget, "sph", "Current actual")}</div></section>`;
+  const dayLabel = month.actualCalendarDays === 1 ? "calendar day" : "calendar days";
+  return `<section class="budget-sales-projection" aria-label="${escapeHtml(month.label)} projected month-end"><header><div><span>Projected month-end</span><strong>Current run-rate forecast</strong></div><small>Based on ${month.actualCalendarDays} ${dayLabel}, weighted to the usual Monday–Sunday sales mix; this does not replace the actual-to-date view.</small></header><div class="budget-sales-projection__bars">${renderBudgetSalesMonthBar("Sales ex VAT", month.summarySalesValue, month.summarySalesTarget, "currency", "Projected")}${renderBudgetSalesMonthBar("Covers", month.summaryCoversValue, month.summaryCoversTarget, "number", "Projected")}${renderBudgetSalesMonthBar("SPH inc VAT", month.summarySpendPerHeadValue, month.summarySpendPerHeadTarget, "sph", "Current actual")}</div></section>`;
 }
 
 function renderBudgetSalesWeeklyBar(label, value, target, kind = "number", { projected = false } = {}) {
   const hasValue = value !== null && value !== "" && Number.isFinite(Number(value));
-  const tone = budgetSalesBarTone(value, target, { plan: !hasValue });
-  const { fill, marker } = hasValue ? budgetSalesBarScale(value, target) : { fill: 0, marker: 0 };
-  const track = hasValue ? `<i style="width:${fill.toFixed(2)}%"></i><em style="left:${marker.toFixed(2)}%"></em>` : "";
+  const tone = budgetSalesBarTone(value, target, { plan: !hasValue, kind });
+  const fill = hasValue && Number(target) > 0 ? Math.min(100, Math.max(0, Number(value) / Number(target) * 100)) : 0;
+  const difference = hasValue && Number.isFinite(Number(target)) ? Number(target) - Number(value) : null;
+  const change = !hasValue ? "Not started" : Math.abs(difference) < .5 ? "Target reached" : difference > 0 ? `${budgetSalesBarFormat(difference, kind)} still needed` : `Up ${budgetSalesBarFormat(Math.abs(difference), kind)} vs target`;
+  const changeTone = !hasValue ? "" : Math.abs(difference) < .5 ? "reached" : difference > 0 ? "needed" : "up";
+  const track = hasValue ? `<i style="width:${fill.toFixed(2)}%"></i>` : "";
   const valueLabel = projected ? "projected" : "actual";
-  return `<div class="budget-sales-week__metric budget-sales-week__metric--${tone}"><div><dt>${escapeHtml(label)}</dt><dd>${hasValue ? budgetSalesBarFormat(value, kind) : "—"}<small>Target ${budgetSalesBarFormat(target, kind)}</small></dd></div><div class="budget-sales-week__track" role="img" aria-label="${escapeHtml(label)}: ${hasValue ? `${valueLabel} ${budgetSalesBarFormat(value, kind)} against target ${budgetSalesBarFormat(target, kind)}` : "not started"}">${track}</div></div>`;
+  return `<div class="budget-sales-week__metric budget-sales-week__metric--${tone}"><div><dt>${escapeHtml(label)}</dt><dd>${hasValue ? budgetSalesBarFormat(value, kind) : "—"}<small>Target ${budgetSalesBarFormat(target, kind)}</small></dd></div><div class="budget-sales-week__track" role="img" aria-label="${escapeHtml(label)}: ${hasValue ? `${valueLabel} ${budgetSalesBarFormat(value, kind)} against target ${budgetSalesBarFormat(target, kind)}` : "not started"}">${track}</div><small class="budget-sales-week__remaining${changeTone ? ` budget-sales-week__remaining--${changeTone}` : ""}">${escapeHtml(change)}</small></div>`;
 }
 
 function renderBudgetSalesMetric(label, actual, target, detail, kind = "number") {
@@ -1790,34 +1997,40 @@ function renderBudgetSalesSummaryBar(label, value, target, kind = "number", valu
   const validValue = Number.isFinite(Number(value));
   const validTarget = Number.isFinite(Number(target)) && Number(target) > 0;
   const difference = validValue && validTarget ? Number(value) - Number(target) : null;
-  const tone = notStarted || difference === null ? "plan" : Math.abs(difference) < .5 ? "on-plan" : difference > 0 ? "ahead" : "behind";
-  const scale = validValue && validTarget ? Math.max(Number(value), Number(target)) * 1.12 : validTarget ? Number(target) * 1.12 : 1;
-  const fill = validValue ? Math.min(100, Math.max(0, Number(value) / scale * 100)) : 0;
-  const marker = validTarget ? Math.min(100, Math.max(0, Number(target) / scale * 100)) : 0;
-  const change = notStarted ? "Not started — reforecast plan" : difference === null ? "No actuals yet" : Math.abs(difference) < .5 ? "On target" : `${difference > 0 ? "Up" : "Down"} ${budgetSalesSummaryFormat(Math.abs(difference), kind)} vs target`;
-  return `<article class="budget-sales-summary__bar budget-sales-summary__bar--${tone}"><div><span>${escapeHtml(label)}</span><strong>${budgetSalesSummaryFormat(value, kind)}</strong></div><p><i>${escapeHtml(valueLabel)}</i><b>Target ${budgetSalesSummaryFormat(target, kind)}</b></p><div class="budget-sales-summary__track" role="img" aria-label="${escapeHtml(label)}: ${escapeHtml(valueLabel)} ${budgetSalesSummaryFormat(value, kind)} against target ${budgetSalesSummaryFormat(target, kind)}"><i style="width:${fill.toFixed(2)}%"></i><em style="left:${marker.toFixed(2)}%"></em></div><small>${escapeHtml(change)}</small></article>`;
+  const barTone = budgetSalesBarTone(value, target, { plan: notStarted, kind });
+  const tone = barTone === "above-budget" ? "ahead" : barTone === "near-target" ? "on-plan" : barTone === "below-budget" ? "behind" : "plan";
+  const fill = validValue && validTarget ? Math.min(100, Math.max(0, Number(value) / Number(target) * 100)) : 0;
+  const remaining = validValue && validTarget ? Number(target) - Number(value) : null;
+  const change = notStarted ? "Not started — reforecast plan" : difference === null ? "No actuals yet" : Math.abs(remaining) < .5 ? "Target reached" : remaining > 0 ? `${budgetSalesSummaryFormat(remaining, kind)} still needed` : `Up ${budgetSalesSummaryFormat(Math.abs(remaining), kind)} vs target`;
+  const changeTone = notStarted || difference === null ? "" : Math.abs(remaining) < .5 ? "reached" : remaining > 0 ? "needed" : "up";
+  return `<article class="budget-sales-summary__bar budget-sales-summary__bar--${tone}"><div><span>${escapeHtml(label)}</span><strong>${budgetSalesSummaryFormat(value, kind)}</strong></div><p><i>${escapeHtml(valueLabel)}</i><b>Target ${budgetSalesSummaryFormat(target, kind)}</b></p><div class="budget-sales-summary__track" role="img" aria-label="${escapeHtml(label)}: ${escapeHtml(valueLabel)} ${budgetSalesSummaryFormat(value, kind)} against target ${budgetSalesSummaryFormat(target, kind)}"><i style="width:${fill.toFixed(2)}%"></i></div><small class="budget-sales-summary__change${changeTone ? ` budget-sales-summary__change--${changeTone}` : ""}">${escapeHtml(change)}</small></article>`;
 }
 
 function renderBudgetSalesMonthlySummary(month) {
   const mode = month.status === "active" ? "Projected month-end" : month.status === "complete" ? "Final month actuals" : "Reforecast monthly plan";
-  const description = month.status === "active" ? `Projection uses the average of ${month.actualWeekCount} completed ${month.actualWeekCount === 1 ? "reporting week" : "reporting weeks"}.` : month.status === "complete" ? "Actual performance against the original monthly plan." : "The plan reflects any sales gap shared from completed months.";
+  const description = month.status === "active" ? `Projection uses ${month.actualCalendarDays} calendar days, weighted to the usual Monday–Sunday sales mix.` : month.status === "complete" ? "Actual performance against the original monthly plan." : "The plan reflects any sales gap shared from completed months.";
   const valueLabel = month.status === "active" ? "Projected" : month.status === "complete" ? "Actual" : "Reforecast";
   const notStarted = month.status === "future";
-  return `<section class="budget-sales-summary" aria-label="${escapeHtml(month.label)} monthly summary"><div class="budget-sales-summary__heading"><div><p class="eyebrow">MONTHLY SUMMARY</p><h3>${escapeHtml(mode)}</h3></div><p>${escapeHtml(description)}</p></div><div class="budget-sales-summary__bars">${renderBudgetSalesSummaryBar("Sales ex VAT", month.summarySalesValue, month.summarySalesTarget, "currency", valueLabel, { notStarted })}${renderBudgetSalesSummaryBar("Covers", month.summaryCoversValue, month.summaryCoversTarget, "number", valueLabel, { notStarted })}${renderBudgetSalesSummaryBar("SPH inc VAT", month.summarySpendPerHeadValue, month.summarySpendPerHeadTarget, "sph", valueLabel, { notStarted })}</div><p class="budget-sales-summary__key"><i aria-hidden="true"></i>Coloured bar = ${escapeHtml(valueLabel.toLowerCase())}. Light marker = target.</p></section>`;
+  return `<section class="budget-sales-summary" aria-label="${escapeHtml(month.label)} monthly summary"><div class="budget-sales-summary__heading"><div><p class="eyebrow">MONTHLY SUMMARY</p><h3>${escapeHtml(mode)}</h3></div><p>${escapeHtml(description)}</p></div><div class="budget-sales-summary__bars">${renderBudgetSalesSummaryBar("Sales ex VAT", month.summarySalesValue, month.summarySalesTarget, "currency", valueLabel, { notStarted })}${renderBudgetSalesSummaryBar("Covers", month.summaryCoversValue, month.summaryCoversTarget, "number", valueLabel, { notStarted })}${renderBudgetSalesSummaryBar("SPH inc VAT", month.summarySpendPerHeadValue, month.summarySpendPerHeadTarget, "sph", valueLabel, { notStarted })}</div><p class="budget-sales-summary__key"><i aria-hidden="true"></i>Coloured bar = ${escapeHtml(valueLabel.toLowerCase())}. The bar end is the target total.</p></section>`;
 }
 
 function renderBudgetSalesWeeks(month) {
-  const remainingNote = month.status === "active" && month.remainingWeekCount ? month.remainingWeekCount === 1 ? "The remaining reporting week now carries the updated target." : `The remaining ${month.remainingWeekCount} reporting weeks now carry the updated target.` : month.status === "complete" ? "Actuals are compared with the original monthly plan." : "Targets include any reforecast shared from completed months.";
+  const remainingNote = month.status === "active" && month.remainingWeekCount ? month.remainingCalendarDays === 1 ? "The remaining calendar day carries its share of the updated target." : `The remaining ${month.remainingCalendarDays} calendar days carry their share of the updated target.` : month.status === "complete" ? "Actuals are split across the calendar days in this month and compared with the original monthly plan." : "Targets include any reforecast shared from completed months.";
   const canProject = month.status === "active" && month.actualWeekCount > 0 && month.remainingWeekCount > 0;
   const projectionOpen = state.budgetSalesWeekProjectionMonth === month.month;
   const futureWeeks = month.weekly.filter((week) => !week.hasActual && !week.pastWeek);
   const distributeProjection = (forecast, actual) => {
     if (!futureWeeks.length) return [];
     const remaining = Math.round(forecast) - Math.round(actual);
-    const base = Math.trunc(remaining / futureWeeks.length);
-    const extra = Math.abs(remaining - base * futureWeeks.length);
-    const direction = remaining < 0 ? -1 : 1;
-    return futureWeeks.map((week, index) => ({ week: week.week, value: base + (index < extra ? direction : 0) }));
+    const remainingTradeWeight = futureWeeks.reduce((total, week) => total + week.tradeWeight, 0);
+    let allocated = 0;
+    return futureWeeks.map((week, index) => {
+      const value = index === futureWeeks.length - 1
+        ? remaining - allocated
+        : Math.round(remaining * (remainingTradeWeight ? week.tradeWeight / remainingTradeWeight : 1 / futureWeeks.length));
+      allocated += value;
+      return { week: week.week, value };
+    });
   };
   const projectedSalesByWeek = new Map(distributeProjection(month.summarySalesValue, month.actualSales).map((item) => [item.week, item.value]));
   const projectedCoversByWeek = new Map(distributeProjection(month.summaryCoversValue, month.actualCovers).map((item) => [item.week, item.value]));
@@ -1827,7 +2040,8 @@ function renderBudgetSalesWeeks(month) {
     const sales = projected ? projectedSalesByWeek.get(week.week) : week.actualSales;
     const covers = projected ? projectedCoversByWeek.get(week.week) : week.actualCovers;
     const spendPerHead = projected ? month.actualSpendPerHead : week.actualSpendPerHead;
-    return `<article class="budget-sales-week budget-sales-week--${week.hasActual ? "actual" : projected ? "projected" : week.pastWeek ? "missing" : "future"}"><header><span>${escapeHtml(formatDate(week.week, true))}</span><b>${status}</b></header><dl>${renderBudgetSalesWeeklyBar("Sales ex VAT", sales, week.targetSales, "currency", { projected })}${renderBudgetSalesWeeklyBar("Covers", covers, week.targetCovers, "number", { projected })}${renderBudgetSalesWeeklyBar("SPH inc VAT", spendPerHead, week.targetSpendPerHead, "sph", { projected })}</dl></article>`;
+    const dayText = `${week.daysInMonth} ${week.daysInMonth === 1 ? "day" : "days"} in month`;
+    return `<article class="budget-sales-week budget-sales-week--${week.hasActual ? "actual" : projected ? "projected" : week.pastWeek ? "missing" : "future"}"><header><span>${escapeHtml(formatDate(week.week, true))}</span><b>${status} · ${dayText}</b></header><dl>${renderBudgetSalesWeeklyBar("Sales ex VAT", sales, week.targetSales, "currency", { projected })}${renderBudgetSalesWeeklyBar("Covers", covers, week.targetCovers, "number", { projected })}${renderBudgetSalesWeeklyBar("SPH inc VAT", spendPerHead, week.targetSpendPerHead, "sph", { projected })}</dl></article>`;
   }).join("")}</div></section>`;
 }
 
@@ -1842,10 +2056,10 @@ function budgetSalesMonthPresentation(month) {
   const isActive = month.status === "active";
   const targetSalesLabel = isComplete ? "Original plan" : isActive ? "Current reforecast" : "Reforecast";
   const salesDetail = month.hasActuals ? `${targetSalesLabel} ${executiveFormat(isComplete ? month.baseSalesTarget : month.reforecastSalesTarget, "currency")}` : `Budget ${executiveFormat(month.sales, "currency")}`;
-  const coversDetail = `Plan ${executiveFormat(month.plannedMonthlyCovers)} covers`;
-  const spendDetail = isActive
-    ? month.remainingSalesNeeded <= 0 ? "Sales target already met" : `Need ${budgetFormatSpendPerHead(month.targetSpendPerHead)} for ${month.remainingWeekCount} remaining ${month.remainingWeekCount === 1 ? "week" : "weeks"}`
-    : isComplete ? `Budget target ${budgetFormatSpendPerHead(month.targetSpendPerHead)}` : `Reforecast target ${budgetFormatSpendPerHead(month.targetSpendPerHead)}`;
+  const coversDetail = isComplete ? `Original plan ${executiveFormat(month.plannedMonthlyCovers)} covers` : `Reforecast ${executiveFormat(month.reforecastMonthlyCovers)} covers`;
+  const spendDetail = isComplete
+    ? `Budget target ${budgetFormatSpendPerHead(month.targetSpendPerHead)}`
+    : `Fixed SPH target ${budgetFormatSpendPerHead(month.targetSpendPerHead)}`;
   const statusText = isComplete ? "Completed month" : isActive ? `Live to ${formatDate(month.cutoff, true)}` : "Not started";
   const statusTarget = isActive ? `${executiveFormat(month.remainingSalesNeeded, "currency")} sales still required` : !isComplete && Math.abs(month.reforecastSalesTarget - month.baseSalesTarget) >= .5 ? `${month.reforecastSalesTarget > month.baseSalesTarget ? "Up" : "Down"} ${executiveFormat(Math.abs(month.reforecastSalesTarget - month.baseSalesTarget), "currency")} from the monthly plan` : `${month.weekCount} reporting weeks`;
   return { varianceTone, expanded, varianceText, startingSpendText, isComplete, isActive, targetSalesLabel, salesDetail, coversDetail, spendDetail, statusText, statusTarget };
@@ -1861,21 +2075,21 @@ function renderBudgetSalesMonth(month) {
   const plan = month.status === "future";
   const live = view.isActive;
   const salesValue = live ? month.actualSales : month.summarySalesValue;
-  const salesTarget = live ? month.salesPaceTarget : month.summarySalesTarget;
+  const salesTarget = month.summarySalesTarget;
   const coversValue = live ? month.actualCovers : month.summaryCoversValue;
-  const coversTarget = live ? month.coversPaceTarget : month.summaryCoversTarget;
-  const salesTone = budgetSalesBarTone(salesValue, salesTarget, { plan });
+  const coversTarget = month.summaryCoversTarget;
+  const salesTone = budgetSalesBarTone(salesValue, salesTarget, { plan, kind: "currency" });
   const valueLabel = view.isComplete ? "Actual" : live ? "Actual to date" : "Planned";
   const headlineSales = live ? month.actualSales : view.isComplete ? month.summarySalesValue : month.monthlySalesTarget;
-  const headlineLabel = view.isComplete ? "Actual sales ex VAT" : live ? "Actual sales ex VAT to date" : "Sales target ex VAT";
+  const headlineLabel = view.isComplete ? "Actual sales ex VAT" : live ? "Actual sales ex VAT to date" : "Sales plan ex VAT";
   const projectionOpen = state.budgetSalesProjectionMonth === month.month;
-  const salesPaceOptions = { targetLabel: "Pace", comparisonLabel: "pace", scaleTarget: month.summarySalesTarget };
-  const coversPaceOptions = { targetLabel: "Pace", comparisonLabel: "pace", scaleTarget: month.summaryCoversTarget };
+  const salesPlanOptions = { targetLabel: "Plan", comparisonLabel: "plan", scaleTarget: month.summarySalesTarget, progressToTotal: true };
+  const coversPlanOptions = { targetLabel: "Plan", comparisonLabel: "plan", scaleTarget: month.summaryCoversTarget, progressToTotal: true };
   return `<article class="budget-sales-month budget-sales-month--${salesTone}" data-budget-month="${escapeHtml(month.month)}">
     <button class="budget-sales-month__toggle" type="button" data-action="open-budget-sales-month" data-month="${escapeHtml(month.month)}"><div class="budget-sales-month__heading"><div><span>${escapeHtml(month.label)}</span><strong>${executiveFormat(headlineSales, "currency")}</strong><small>${headlineLabel}</small></div><div><span>Budget ex VAT</span><b>${executiveFormat(month.sales, "currency")}</b><small>Open month ›</small></div></div>
       <div class="budget-sales-month__week"><span>${escapeHtml(view.statusText)}</span><strong>${escapeHtml(view.statusTarget)}</strong></div>
       ${renderBudgetSalesMonthProgress(month)}
-      <div class="budget-sales-month__bars">${renderBudgetSalesMonthBar("Sales ex VAT", salesValue, salesTarget, "currency", valueLabel, live ? salesPaceOptions : { plan })}${renderBudgetSalesMonthBar("Covers", coversValue, coversTarget, "number", valueLabel, live ? coversPaceOptions : { plan })}${renderBudgetSalesMonthBar("SPH inc VAT", month.summarySpendPerHeadValue, month.summarySpendPerHeadTarget, "sph", valueLabel, { plan })}</div>
+      <div class="budget-sales-month__bars">${renderBudgetSalesMonthBar("Sales ex VAT", salesValue, salesTarget, "currency", valueLabel, live ? salesPlanOptions : { plan })}${renderBudgetSalesMonthBar("Covers", coversValue, coversTarget, "number", valueLabel, live ? coversPlanOptions : { plan })}${renderBudgetSalesLiveCovers(month)}${renderBudgetSalesMonthBar("SPH inc VAT", month.summarySpendPerHeadValue, month.summarySpendPerHeadTarget, "sph", valueLabel, { plan })}</div>
       <p class="budget-sales-month__open">Open the month for weekly performance and planning controls <b aria-hidden="true">›</b></p>
     </button>
     ${live ? `<button class="budget-sales-month__projection-button" type="button" data-action="toggle-budget-sales-projection" data-month="${escapeHtml(month.month)}" aria-expanded="${projectionOpen}">${projectionOpen ? "Hide projected month-end" : "View projected month-end"}<b aria-hidden="true">${projectionOpen ? "−" : "+"}</b></button>${projectionOpen ? renderBudgetSalesProjection(month) : ""}` : ""}
@@ -1890,9 +2104,12 @@ function renderBudgetSalesMonthPage() {
   const view = budgetSalesMonthPresentation(month);
   const live = view.isActive;
   const detailHeadline = live ? month.actualSales : view.isComplete ? month.summarySalesValue : month.monthlySalesTarget;
-  const detailHeadlineLabel = view.isComplete ? "Actual sales ex VAT" : live ? "Actual sales ex VAT to date" : "Sales target ex VAT";
+  const detailHeadlineLabel = view.isComplete ? "Actual sales ex VAT" : live ? "Actual sales ex VAT to date" : "Sales plan ex VAT";
   const projectionOpen = state.budgetSalesProjectionMonth === month.month;
   const hasOverrides = budgetSalesMonthHasOverrides(year, month.month);
+  const spendTargetExplanation = view.isComplete
+    ? ""
+    : `<p class="budget-sales-month__automatic"><strong>Fixed SPH target: ${budgetFormatSpendPerHead(month.reforecastSpendPerHeadTarget)}.</strong> It stays at the budget starting value unless you change it here. Covers are then calculated at ${executiveFormat(month.reforecastCoversPerWeek)} per week to deliver the current sales plan of ${executiveFormat(month.reforecastSalesTarget, "currency")}.</p>`;
   return `<section class="budget-sales-detail-page">
     <button class="back-link" type="button" data-action="return-budget-sales-plan">&larr; Budget &amp; targets</button>
     <div class="page-intro"><p class="eyebrow">${escapeHtml(year)} MONTHLY PLAN</p><h2>${escapeHtml(monthTitle(month.month))}</h2><p>Review the month’s actuals, the target still required and each reporting week in one place.</p></div>
@@ -1900,10 +2117,12 @@ function renderBudgetSalesMonthPage() {
       <div class="budget-sales-month__heading"><div><span>${escapeHtml(month.label)}</span><strong>${executiveFormat(detailHeadline, "currency")}</strong><small>${detailHeadlineLabel}</small></div><div><span>Budget ex VAT</span><b>${executiveFormat(month.sales, "currency")}</b></div></div>
       <div class="budget-sales-month__week"><span>${escapeHtml(view.statusText)}</span><strong>${escapeHtml(view.statusTarget)}</strong></div>
       ${renderBudgetSalesMonthProgress(month)}
+      ${renderBudgetSalesLiveCovers(month)}
       ${live ? `<button class="budget-sales-month__projection-button" type="button" data-action="toggle-budget-sales-projection" data-month="${escapeHtml(month.month)}" aria-expanded="${projectionOpen}">${projectionOpen ? "Hide projected month-end" : "View projected month-end"}<b aria-hidden="true">${projectionOpen ? "−" : "+"}</b></button>${projectionOpen ? renderBudgetSalesProjection(month) : ""}` : ""}
       <p class="budget-sales-month__basis">Starting point: ${escapeHtml(view.startingSpendText)}</p>
-      <div class="budget-sales-month__inputs"><label>Planning covers / week<input type="number" min="0" step="1" inputmode="numeric" data-action="budget-sales-input" data-month="${escapeHtml(month.month)}" data-field="coversPerWeek" value="${month.coversPerWeek.toFixed(1)}"></label><label>Starting SPH inc VAT (£)<input type="number" min="0.01" step="0.01" inputmode="decimal" data-action="budget-sales-input" data-month="${escapeHtml(month.month)}" data-field="spendPerHead" value="${month.spendPerHead.toFixed(2)}"></label></div>
-      <p class="budget-sales-month__input-help">Changes apply when you tap outside the field or press Return.</p>
+      <div class="budget-sales-month__inputs"><label>Starting covers / week<input type="number" min="0" step="1" inputmode="numeric" data-action="budget-sales-input" data-month="${escapeHtml(month.month)}" data-field="coversPerWeek" value="${month.coversPerWeek.toFixed(1)}"></label><label>Starting SPH inc VAT (£)<input type="number" min="0.01" step="0.01" inputmode="decimal" data-action="budget-sales-input" data-month="${escapeHtml(month.month)}" data-field="spendPerHead" value="${month.spendPerHead.toFixed(2)}"></label></div>
+      <p class="budget-sales-month__input-help">Changes apply when you tap outside the field or press Return. SPH stays fixed until you change it. Changing either starting assumption creates a manual sales-plan change.</p>
+      ${spendTargetExplanation}
       ${hasOverrides ? `<button class="budget-sales-month__reset-button" type="button" data-action="reset-budget-sales-month" data-month="${escapeHtml(month.month)}">Return to budget <small>Keeps any sales reforecast from completed months</small></button>` : ""}
       <p class="budget-sales-month__variance budget-sales-month__variance--${view.varianceTone}">${escapeHtml(view.varianceText)}</p>
       ${renderBudgetSalesWeeks(month)}
@@ -1912,7 +2131,7 @@ function renderBudgetSalesMonthPage() {
 }
 
 function renderBudgetSalesGuide() {
-  return `<section class="budget-sales-guide" aria-label="How Total Sales works"><header><div><span>HOW TOTAL SALES WORKS</span><strong>A simple guide</strong></div><button type="button" data-action="toggle-budget-sales-guide" aria-label="Close Total Sales guide">×</button></header><ol><li><strong>Budget first.</strong> Each month starts with its sales budget. The starting covers target uses that month’s spend per head from the previous financial year.</li><li><strong>Read the month status.</strong> Completed months show final actuals. A live month shows actuals to date against the same point in the plan. Future months and weeks are targets only, so their bars stay empty.</li><li><strong>Keep the annual plan whole.</strong> When a month closes above or below budget, the gap is applied as the same percentage uplift or reduction across all remaining monthly budgets.</li><li><strong>Use projections as a guide.</strong> In a live month, projected month-end and projected remaining weeks use the current run rate. They never change the budget or actual results.</li><li><strong>Adjust with care.</strong> You can change planned Covers per week or starting SPH. “Return to budget” removes your manual change but keeps any uplift or reduction already carried forward from completed months.</li></ol><p><strong>Remember:</strong> sales figures are ex VAT; SPH is shown inc VAT because it is easier to use operationally.</p></section>`;
+  return `<section class="budget-sales-guide" aria-label="How Total Sales works"><header><div><span>HOW TOTAL SALES WORKS</span><strong>A simple guide</strong></div><button type="button" data-action="toggle-budget-sales-guide" aria-label="Close Total Sales guide">×</button></header><ol><li><strong>Budget first.</strong> Each month starts with its sales budget. The starting covers target uses that month’s spend per head from the previous financial year.</li><li><strong>Split weeks realistically.</strong> Until daily sales are available, a cross-month reporting week uses the usual sales mix: Monday 0.01%, Tuesday 8.06%, Wednesday 9.91%, Thursday 13.40%, Friday 21.53%, Saturday 31.25% and Sunday 15.83%. Covers use the same temporary pattern so SPH still reconciles.</li><li><strong>Keep targets fixed.</strong> SPH stays at its budget starting value unless you manually change it. When a completed-month sales gap changes a future sales plan, covers recalculate at that fixed SPH so the numbers still reconcile.</li><li><strong>Read the bars.</strong> The large figure is the current total, the figure on the right is the full target total, and the bar fills towards that target. The note underneath shows what is still needed. Green means the target has been met; amber means it is close but short; red means it is materially short.</li><li><strong>Use the same tolerance everywhere.</strong> A result is amber when it is short by no more than £2,000 in sales, 200 covers or £5 SPH. Any result at or above target is green.</li><li><strong>Read the month status.</strong> Completed months show final actuals. A live month shows actuals to date. Future months and weeks are targets only, so their bars stay empty.</li><li><strong>Keep the annual plan whole.</strong> When a month closes above or below budget, the sales gap is applied as the same percentage uplift or reduction across all remaining monthly sales plans.</li><li><strong>Keep the covers KPI honest.</strong> In a live month, “Covers forecast at current SPH” estimates the total covers needed for the month at the SPH achieved so far. Its blue fill is measured against the full covers plan. It is a forecast, not a new target.</li><li><strong>Use projections as a guide.</strong> In a live month, projected month-end and projected remaining weeks use the current run rate. They never change the budget or actual results.</li><li><strong>Adjust with care.</strong> You can change starting Covers per week or starting SPH. This creates a manual sales-plan change. “Return to budget” removes it but keeps any sales uplift or reduction already carried forward from completed months.</li></ol><p><strong>Remember:</strong> sales figures are ex VAT; SPH is shown inc VAT because it is easier to use operationally.</p></section>`;
 }
 
 function renderBudgetSalesPlan(year) {
@@ -1929,15 +2148,17 @@ function renderBudgetSalesPlan(year) {
   const totalTone = budgetSalesVarianceTone(plan.variance);
   const totalVariance = totalTone === "on-budget" ? "Matches budget" : `${plan.variance > 0 ? "Up" : "Down"} ${executiveFormat(Math.abs(plan.variance), "currency")} vs budget`;
   const completedNote = !plan.completedMonths ? "No completed months yet, so every month is still on its original plan." : !plan.remainingMonths ? `All months are complete. Final completed-month variance: ${plan.completedGap >= 0 ? "down" : "up"} ${executiveFormat(Math.abs(plan.completedGap), "currency")}.` : plan.completedGap === 0 ? "Completed months match plan, so the remaining months are unchanged." : `${plan.completedGap > 0 ? "Down" : "Up"} ${executiveFormat(Math.abs(plan.completedGap), "currency")} from completed months is applied as an even ${Math.abs(plan.sharedSalesUplift * 100).toFixed(1)}% ${plan.completedGap > 0 ? "uplift" : "reduction"} across the remaining monthly budgets.`;
+  const spendTargetNote = "SPH targets remain at their budget starting values unless you change them manually. Actual SPH is shown as performance and as a separate live covers forecast; it does not silently replace the target.";
   const guideOpen = Boolean(state.budgetSalesGuideOpen);
   return `<section class="budget-sales-plan" aria-label="Total sales budget">
-    <div class="budget-sales-plan__heading"><div><p class="eyebrow">TOTAL SALES</p><h3>Turn the sales budget into a live monthly plan</h3><p>See actual sales, covers and SPH against each month’s plan. Once a month closes, any sales gap is applied as the same percentage uplift or reduction across the remaining monthly budgets.</p></div><div class="budget-sales-plan__actions"><button type="button" data-action="toggle-budget-sales-guide" aria-expanded="${guideOpen}">ⓘ How this works</button><button type="button" data-action="reset-budget-sales-plan">Reset to budget</button></div></div>
+    <div class="budget-sales-plan__heading"><div><p class="eyebrow">TOTAL SALES</p><h3>Turn the sales budget into a live monthly plan</h3><p>See actual sales, covers and SPH against each month’s plan. Sales gaps are shared across future sales plans; SPH remains fixed unless you deliberately change it.</p></div><div class="budget-sales-plan__actions"><button type="button" data-action="toggle-budget-sales-guide" aria-expanded="${guideOpen}">ⓘ How this works</button><button type="button" data-action="reset-budget-sales-plan">Reset to budget</button></div></div>
     ${guideOpen ? renderBudgetSalesGuide() : ""}
     <div class="budget-sales-plan__baseline"><div><span>Annual sales budget ex VAT</span><strong>${executiveFormat(plan.totalBudgetSales, "currency")}</strong></div><div><span>Reporting cut-off</span><strong>${plan.cutoff ? escapeHtml(formatDate(plan.cutoff, true)) : "No actuals"}</strong><small>Actuals shown up to this reporting week</small></div><div><span>Starting SPH</span><strong>Same month last year</strong><small>SPH converts to ex VAT for the budget</small></div></div>
     <div class="budget-sales-plan__months">${plan.months.map(renderBudgetSalesMonth).join("")}</div>
     <div class="budget-sales-plan__total budget-sales-plan__total--${totalTone}"><div><span>Annual sales forecast ex VAT</span><strong>${executiveFormat(plan.totalSalesTarget, "currency")}</strong><small>${totalVariance}</small></div><div><span>Annual budget ex VAT</span><strong>${executiveFormat(plan.totalBudgetSales, "currency")}</strong></div></div>
     <p class="budget-sales-plan__reforecast">${escapeHtml(completedNote)}</p>
-    <p class="budget-sales-plan__note">Each month starts with that same calendar month’s actual SPH from ${escapeHtml(previousYear)}. SPH is shown including VAT, then converted to ex VAT so sales reconcile with the budget. Change the planning covers or starting SPH when needed; live SPH targets then recalculate from actuals and the sales still required.</p>
+    <p class="budget-sales-plan__reforecast budget-sales-plan__reforecast--sph">${escapeHtml(spendTargetNote)}</p>
+    <p class="budget-sales-plan__note">Each month starts with that same calendar month’s actual SPH from ${escapeHtml(previousYear)}. SPH is shown including VAT, then converted to ex VAT so sales reconcile with the budget. A manual change to starting covers or SPH creates a new sales-plan assumption for that month.</p>
   </section>`;
 }
 
@@ -3197,7 +3418,7 @@ function attachDynamicListeners() {
     render();
   }));
   document.querySelectorAll("[data-action='open-executive-scenario']").forEach((button) => button.addEventListener("click", () => {
-    const rows = executiveRowsForWeeks(executivePeriodWeeks());
+    const rows = executiveRowsForSelectedPeriod();
     const baseline = executiveScenarioBaseline(rows);
     if (!baseline) return;
     state = { ...state, executiveScenarioOpen: true, executiveScenario: defaultExecutiveScenario(baseline), executiveDetailMetric: "", executiveDetailOverlays: [] };
@@ -3209,7 +3430,7 @@ function attachDynamicListeners() {
     render();
   }));
   document.querySelectorAll("[data-action='reset-executive-scenario']").forEach((button) => button.addEventListener("click", () => {
-    const rows = executiveRowsForWeeks(executivePeriodWeeks());
+    const rows = executiveRowsForSelectedPeriod();
     const baseline = executiveScenarioBaseline(rows);
     if (!baseline) return;
     state = { ...state, executiveScenario: defaultExecutiveScenario(baseline) };
@@ -3219,7 +3440,7 @@ function attachDynamicListeners() {
     applyExecutiveScenario();
   }));
   document.querySelectorAll("[data-action='set-executive-scenario-mode']").forEach((select) => select.addEventListener("change", () => {
-    const rows = executiveRowsForWeeks(executivePeriodWeeks());
+    const rows = executiveRowsForSelectedPeriod();
     const { baseline, scenario } = executiveScenarioForRows(rows);
     if (!baseline || !scenario) return;
     const next = { ...scenario };
